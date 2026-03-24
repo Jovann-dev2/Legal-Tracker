@@ -59,11 +59,6 @@ CRITICAL_SKILLS_DEFAULT: Final[list[str]] = [
     "Miner Development",
     "Miner General",
 ]
-FILTER_MODES: Final[dict[str, str]] = {
-    "Both (no filter)": "Both",
-    "Critical only": "Critical only",
-    "Non-critical only": "Non-critical only",
-}
 
 st.set_page_config(page_title="Unavailability Insights", layout="wide")
 
@@ -105,7 +100,6 @@ SHEET_COLUMN_MAP: Final[dict[str, SheetConfig]] = {
 # Generic helpers
 # ============================================================
 def normalize_text(value: object) -> str:
-    """Normalize text for robust matching."""
     return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
 
 
@@ -117,7 +111,6 @@ def validate_year(year: int) -> int:
 
 
 def find_first_header_row(df: pd.DataFrame, min_non_empty: int = 6, max_scan: int = 50) -> int:
-    """Return the most likely header row index."""
     scan_limit = min(len(df), max_scan)
     for idx in range(scan_limit):
         row = df.iloc[idx]
@@ -128,7 +121,6 @@ def find_first_header_row(df: pd.DataFrame, min_non_empty: int = 6, max_scan: in
 
 
 def read_sheet_with_header_detection(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
-    """Read a sheet while automatically detecting the header row."""
     temp = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, engine="openpyxl")
     header_row = find_first_header_row(temp)
     header = temp.iloc[header_row].astype(str).tolist()
@@ -139,7 +131,6 @@ def read_sheet_with_header_detection(excel_file: pd.ExcelFile, sheet_name: str) 
 
 
 def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
-    """Find the best matching column using normalized exact and fuzzy matching."""
     normalized_targets = [normalize_text(candidate) for candidate in candidates]
     normalized_columns = {column: normalize_text(column) for column in df.columns}
 
@@ -155,7 +146,6 @@ def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
 
 
 def parse_dates(series: pd.Series) -> pd.Series:
-    """Parse regular datetimes and Excel serial dates into pandas timestamps."""
     if pd.api.types.is_datetime64_any_dtype(series):
         return series
 
@@ -175,7 +165,6 @@ def parse_dates(series: pd.Series) -> pd.Series:
 
 
 def classify_sheet(df: pd.DataFrame, sheet_name: str) -> tuple[str | None, dict[str, str]]:
-    """Classify a sheet and return the logical mapping of required columns."""
     hard_coded = SHEET_COLUMN_MAP.get(sheet_name)
     if hard_coded:
         required_columns = {
@@ -206,7 +195,6 @@ def apply_designation_filter(
     filter_mode: str,
     critical_designations: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Apply designation criticality filtering if a designation column exists."""
     if filter_mode == "Both":
         return df
 
@@ -226,7 +214,6 @@ def apply_designation_filter(
 
 
 def ensure_non_empty_group(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
-    """Keep only rows with non-empty group labels."""
     return df[df[group_col].notna() & (df[group_col].astype(str).str.strip() != "")].copy()
 
 
@@ -237,7 +224,6 @@ def build_monthly_pivot(
     legal_type: str,
     year: int,
 ) -> pd.DataFrame:
-    """Return a monthly count pivot by shaft/group for a single legal type."""
     valid = df.loc[expiry_date.notna()].copy()
     if valid.empty:
         empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
@@ -265,14 +251,10 @@ def build_monthly_pivot(
 
 
 def compute_annual_leave_expiry(last_leave_series: pd.Series) -> pd.Series:
-    """
-    Business rule: annual leave expiry is 18 months after the recorded last leave date.
-    """
     return last_leave_series + pd.DateOffset(months=18)
 
 
 def finalize_result(pivots: list[pd.DataFrame]) -> tuple[pd.DataFrame, list[str]]:
-    """Combine pivots into a flat result table."""
     columns_out = [*MONTH_NAMES, "Total"]
     if not pivots:
         empty = pd.DataFrame(columns=["Shaft", "Legal Type", *columns_out])
@@ -321,7 +303,6 @@ def build_result(
     designation_filter_mode: str,
     critical_designations_selected: tuple[str, ...],
 ) -> tuple[pd.DataFrame, list[str], list[str]]:
-    """Parse workbook, classify sheets, apply optional filters, and aggregate results."""
     excel_file = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
     pivots: list[pd.DataFrame] = []
     skipped_sheets: list[str] = []
@@ -362,7 +343,6 @@ def aggregate_by_custom_groups(
     shaft_to_group_map: dict[str, str],
     month_columns: list[str],
 ) -> pd.DataFrame:
-    """Aggregate rows by custom shaft grouping while preserving legal type detail."""
     if df.empty:
         return df
 
@@ -383,7 +363,6 @@ def aggregate_by_custom_groups(
 
 
 def get_group_conflicts(group_definitions: list[dict[str, object]]) -> tuple[dict[str, str], list[str]]:
-    """Create shaft→group map and detect shafts assigned to multiple groups."""
     shaft_to_group: dict[str, str] = {}
     conflicts: set[str] = set()
 
@@ -400,7 +379,6 @@ def get_group_conflicts(group_definitions: list[dict[str, object]]) -> tuple[dic
 
 
 def init_group_state(shafts: list[str]) -> None:
-    """Reset dynamic grouping state when the underlying shaft list changes."""
     shafts_signature = tuple(shafts)
     if st.session_state.get("shafts_signature") != shafts_signature:
         st.session_state.shafts_signature = shafts_signature
@@ -410,7 +388,6 @@ def init_group_state(shafts: list[str]) -> None:
 
 
 def add_group_definition() -> None:
-    """Append a new group definition to session state."""
     st.session_state.group_defs.append(
         {
             "id": str(uuid4()),
@@ -428,7 +405,6 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
 
 
 def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], year: int) -> bytes:
-    """Create a formatted Excel export with a grouped legals layout."""
     export_df = result_df.copy()
     if export_df.empty:
         export_df = pd.DataFrame(columns=["Shaft", "Legal Type", *columns_out])
@@ -651,40 +627,32 @@ def render_header() -> int:
     return validate_year(int(selected_year))
 
 
-def render_designation_filters(file_bytes: bytes) -> tuple[str, tuple[str, ...]]:
+def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
     st.subheader("🎯 Designation filter")
-    mode_label = st.selectbox(
-        "Which designations should be included?",
-        options=list(FILTER_MODES.keys()),
-        index=0,
-        help="If a sheet contains a Designation column, the selected rule will be applied.",
-    )
-
     dataset_designations = get_all_designations(file_bytes)
     defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
 
-    selected_critical: list[str] = []
-    if FILTER_MODES[mode_label] != "Both":
-        st.caption(
-            "Choose which designations count as critical. Any custom additions below are merged with the selection."
-        )
-        selected_critical = st.multiselect(
-            "Critical designations",
-            options=dataset_designations,
-            default=defaults,
-            help="These values are treated as the critical designation list for filtering.",
-        )
-        custom_values = st.text_area(
-            "Additional critical designations (optional)",
-            placeholder="One per line, or separate with commas / semicolons",
-            help="Use this if the workbook contains values not already listed above.",
-        )
-        if custom_values.strip():
-            extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
-            selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
+    st.caption(
+        "Choose which designations count as critical. These will be used for the 'Critical only' output. "
+        "The 'Both' output ignores this list."
+    )
+    selected_critical = st.multiselect(
+        "Critical designations",
+        options=dataset_designations,
+        default=defaults,
+        help="These values are treated as the critical designation list for filtering.",
+    )
+    custom_values = st.text_area(
+        "Additional critical designations (optional)",
+        placeholder="One per line, or separate with commas / semicolons",
+        help="Use this if the workbook contains values not already listed above.",
+    )
+    if custom_values.strip():
+        extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
+        selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
 
     selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
-    return FILTER_MODES[mode_label], selected_critical_tuple
+    return selected_critical_tuple
 
 
 def render_summary_metrics(df: pd.DataFrame, month_columns: list[str]) -> None:
@@ -716,6 +684,7 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
     output_filename = base_filename
 
     if grouping_enabled == "No" or result.empty:
+        st.session_state["last_exclude_ungrouped"] = False
         return result_to_show, output_filename
 
     shafts = sorted(result["Shaft"].astype(str).dropna().unique().tolist())
@@ -727,6 +696,7 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
         value=False,
         help="When enabled, only shafts explicitly assigned to a custom group are included in the aggregated output.",
     )
+    st.session_state["last_exclude_ungrouped"] = bool(exclude_ungrouped)
 
     if not st.session_state.group_defs:
         st.info("No custom groups yet.")
@@ -856,29 +826,53 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
             st.altair_chart(build_totals_line_chart(filtered_totals_df, month_columns), use_container_width=True)
 
 
-def render_downloads(df: pd.DataFrame, columns_out: list[str], year: int, csv_filename: str) -> None:
+def render_downloads_dual(
+    df_both: pd.DataFrame,
+    df_critical: pd.DataFrame,
+    columns_out: list[str],
+    year: int,
+    csv_filename_both: str,
+    csv_filename_critical: str,
+) -> None:
     st.subheader("⬇️ Downloads")
-    if df.empty:
+    if df_both.empty and df_critical.empty:
         st.info("No data available to export.")
         return
 
-    download_col1, download_col2 = st.columns(2)
+    col_left, col_right = st.columns(2)
 
-    with download_col1:
+    with col_left:
+        st.markdown("**All designations (Both)**")
         st.download_button(
-            label="Download aggregated CSV",
-            data=dataframe_to_csv_bytes(df),
-            file_name=csv_filename,
+            label="Download aggregated CSV (Both)",
+            data=dataframe_to_csv_bytes(df_both),
+            file_name=csv_filename_both,
             mime="text/csv",
             use_container_width=True,
         )
-
-    with download_col2:
-        xlsx_bytes = build_legals_xlsx_bytes(df, columns_out, year)
+        xlsx_bytes_both = build_legals_xlsx_bytes(df_both, columns_out, year)
         st.download_button(
-            label=f"Download Legals {year} (XLSX)",
-            data=xlsx_bytes,
+            label=f"Download Legals {year} (XLSX, Both)",
+            data=xlsx_bytes_both,
             file_name=f"Legals_{year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+
+    with col_right:
+        st.markdown("**Critical only**")
+        st.download_button(
+            label="Download aggregated CSV (Critical only)",
+            data=dataframe_to_csv_bytes(df_critical),
+            file_name=csv_filename_critical,
+            mime="text/csv",
+            use_container_width=True,
+        )
+        xlsx_bytes_crit = build_legals_xlsx_bytes(df_critical, columns_out, year)
+        st.download_button(
+            label=f"Download Legals {year} (XLSX, Critical only)",
+            data=xlsx_bytes_crit,
+            file_name=f"Legals_{year}_CriticalOnly.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -896,53 +890,98 @@ def main() -> None:
         return
 
     file_bytes = uploaded_file.getvalue()
-    filter_mode, selected_critical_designations = render_designation_filters(file_bytes)
+    selected_critical_designations = render_designation_filters(file_bytes)
 
-    result, columns_out, skipped_sheets = build_result(
+    result_both, columns_out_both, skipped_sheets_both = build_result(
         file_bytes=file_bytes,
         year=selected_year,
-        designation_filter_mode=filter_mode,
+        designation_filter_mode="Both",
         critical_designations_selected=selected_critical_designations,
     )
 
-    month_columns = columns_out[:-1]
-    csv_filename = f"{selected_year}_expiries_by_shaft.csv"
+    result_critical, columns_out_critical, skipped_sheets_critical = build_result(
+        file_bytes=file_bytes,
+        year=selected_year,
+        designation_filter_mode="Critical only",
+        critical_designations_selected=selected_critical_designations,
+    )
 
-    if skipped_sheets:
+    columns_out = columns_out_both
+    month_columns = columns_out[:-1]
+    csv_filename_both = f"{selected_year}_expiries_by_shaft.csv"
+    csv_filename_critical = f"{selected_year}_expiries_by_shaft_critical_only.csv"
+
+    skipped_all = sorted(set(skipped_sheets_both).union(skipped_sheets_critical))
+    if skipped_all:
         with st.expander("ℹ️ Workbook processing notes"):
             st.write(
                 "Some sheets were skipped because they did not match the expected layout or could not be processed:"
             )
-            st.write(", ".join(skipped_sheets))
+            st.write(", ".join(skipped_all))
 
-    render_summary_metrics(result, month_columns)
+    render_summary_metrics(result_both, month_columns)
 
     st.subheader("📋 Aggregated results")
-    if result.empty:
-        st.warning("No matching expiry records were found for the selected year and filters.")
+    if result_both.empty:
+        st.warning("No matching expiry records were found for the selected year.")
     else:
         search_term = st.text_input(
             "Search shafts / legal types",
             placeholder="Type part of a shaft or legal type to filter the table",
         ).strip()
-        filtered_result = result.copy()
+
+        filtered_both = result_both.copy()
+        filtered_critical = result_critical.copy()
+
         if search_term:
-            search_mask = (
-                filtered_result["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
-                | filtered_result["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+            mask_both = (
+                filtered_both["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                | filtered_both["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
             )
-            filtered_result = filtered_result[search_mask].copy()
-        st.dataframe(filtered_result, use_container_width=True)
-        result = filtered_result
+            filtered_both = filtered_both[mask_both].copy()
 
-    result_to_show, csv_filename = render_grouping_section(result, month_columns, csv_filename)
+            mask_crit = (
+                filtered_critical["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                | filtered_critical["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+            )
+            filtered_critical = filtered_critical[mask_crit].copy()
 
-    st.subheader("📋 Final result set")
-    st.dataframe(result_to_show, use_container_width=True)
+        st.dataframe(filtered_both, use_container_width=True)
 
-    render_detailed_analysis(result_to_show, month_columns, selected_year)
-    render_totals_analysis(result_to_show, month_columns)
-    render_downloads(result_to_show, columns_out, selected_year, csv_filename)
+        result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
+
+        st.subheader("📋 Final result set")
+        st.dataframe(result_to_show, use_container_width=True)
+
+        shaft_to_group, _ = get_group_conflicts(st.session_state.get("group_defs", []))
+        exclude_ungrouped_flag = bool(st.session_state.get("last_exclude_ungrouped", False))
+
+        df_critical_for_downloads = filtered_critical.copy()
+        if shaft_to_group:
+            if exclude_ungrouped_flag:
+                df_critical_for_downloads = df_critical_for_downloads[
+                    df_critical_for_downloads["Shaft"].astype(str).isin(shaft_to_group)
+                ].copy()
+                csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped_exclusive.csv")
+            else:
+                csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped.csv")
+            df_critical_for_downloads = aggregate_by_custom_groups(
+                df_critical_for_downloads, shaft_to_group, month_columns
+            )
+        else:
+            csv_filename_critical_out = csv_filename_critical
+
+        render_detailed_analysis(result_to_show, month_columns, selected_year)
+        render_totals_analysis(result_to_show, month_columns)
+
+        render_downloads_dual(
+            df_both=result_to_show,
+            df_critical=df_critical_for_downloads,
+            columns_out=columns_out,
+            year=selected_year,
+            csv_filename_both=csv_filename_both_out,
+            csv_filename_critical=csv_filename_critical_out,
+        )
 
 
 if __name__ == "__main__":
