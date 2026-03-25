@@ -251,7 +251,62 @@ def build_monthly_pivot(
 
 
 def compute_annual_leave_expiry(last_leave_series: pd.Series) -> pd.Series:
-    return last_leave_series + pd.DateOffset(months=18)
+    return last_leave_series + pd.DateOffset(months=17)
+
+
+def build_annual_leave_pivot(
+    df: pd.DataFrame,
+    group_col: str,
+    last_leave_series: pd.Series,
+    year: int,
+    rollup_month: int,
+) -> pd.DataFrame:
+    expiry_date = compute_annual_leave_expiry(last_leave_series)
+    valid = df.loc[expiry_date.notna()].copy()
+
+    if valid.empty:
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
+        empty["Legal Type"] = "Annual Leave Expiry"
+        return empty.reset_index().set_index(["Shaft", "Legal Type"])
+
+    valid["_expiry_date"] = expiry_date.loc[expiry_date.notna()]
+    valid = ensure_non_empty_group(valid, group_col)
+
+    if valid.empty:
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
+        empty["Legal Type"] = "Annual Leave Expiry"
+        return empty.reset_index().set_index(["Shaft", "Legal Type"])
+
+    shafts = sorted(valid[group_col].astype(str).unique().tolist())
+    pivot = pd.DataFrame(0, index=pd.Index(shafts, name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
+
+    # Normal monthly counts for the selected reporting year
+    yearly = valid[valid["_expiry_date"].dt.year == year].copy()
+    if not yearly.empty:
+        monthly_counts = (
+            yearly.groupby([group_col, yearly["_expiry_date"].dt.month])
+            .size()
+            .unstack(fill_value=0)
+            .reindex(columns=MONTH_NUMBERS, fill_value=0)
+        )
+        for month in MONTH_NUMBERS:
+            if month != rollup_month:
+                pivot.loc[monthly_counts.index, month] = monthly_counts[month].astype(int)
+
+    # Roll-up month:
+    # Count all annual leave expiries due on or before the end of the selected month
+    rollup_cutoff = pd.Timestamp(year=year, month=rollup_month, day=1) + pd.offsets.MonthEnd(0)
+    rollup_counts = (
+        valid[valid["_expiry_date"] <= rollup_cutoff]
+        .groupby(group_col)
+        .size()
+        .reindex(pivot.index, fill_value=0)
+        .astype(int)
+    )
+    pivot[rollup_month] = rollup_counts
+
+    pivot["Legal Type"] = "Annual Leave Expiry"
+    return pivot.reset_index().set_index(["Shaft", "Legal Type"])
 
 
 def finalize_result(pivots: list[pd.DataFrame]) -> tuple[pd.DataFrame, list[str]]:
@@ -302,6 +357,7 @@ def build_result(
     year: int,
     designation_filter_mode: str,
     critical_designations_selected: tuple[str, ...],
+    annual_leave_rollup_month: int,
 ) -> tuple[pd.DataFrame, list[str], list[str]]:
     excel_file = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
     pivots: list[pd.DataFrame] = []
@@ -325,8 +381,15 @@ def build_result(
                 pivots.append(build_monthly_pivot(data, group_col, expiry_date, legal_type, year))
             elif legal_type == "Annual Leave Expiry":
                 last_leave_series = parse_dates(data[column_map["last_leave"]])
-                expiry_date = compute_annual_leave_expiry(last_leave_series)
-                pivots.append(build_monthly_pivot(data, group_col, expiry_date, legal_type, year))
+                pivots.append(
+                    build_annual_leave_pivot(
+                        data,
+                        group_col,
+                        last_leave_series,
+                        year,
+                        annual_leave_rollup_month,
+                    )
+                )
         except Exception as exc:
             logger.warning("Skipping sheet '%s' because of processing error: %s", sheet_name, exc)
             skipped_sheets.append(sheet_name)
@@ -511,36 +574,8 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], yea
 
 
 # ============================================================
-# Visualization helpers
+# Chart helpers
 # ============================================================
-def build_detail_heatmap(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
-    tidy = df.melt(
-        id_vars=["Shaft", "Legal Type", "Total"],
-        value_vars=month_columns,
-        var_name="Month",
-        value_name="Count",
-    )
-    tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
-    tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
-
-    return (
-        alt.Chart(tidy)
-        .mark_rect()
-        .encode(
-            x=alt.X("Month:O", sort=month_columns, title="Month"),
-            y=alt.Y("Series:N", title="Shaft – Legal Type"),
-            color=alt.Color("Count:Q", title="Count", scale=alt.Scale(scheme="reds")),
-            tooltip=[
-                alt.Tooltip("Shaft:N"),
-                alt.Tooltip("Legal Type:N"),
-                alt.Tooltip("Month:N"),
-                alt.Tooltip("Count:Q"),
-            ],
-        )
-        .properties(width="container", height=min(max(1, tidy["Series"].nunique()) * 28, 800))
-    )
-
-
 def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(
         id_vars=["Shaft", "Legal Type", "Total"],
@@ -575,23 +610,6 @@ def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.Data
     return totals.sort_values("Total", ascending=False).reset_index(drop=True)
 
 
-def build_totals_heatmap(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
-    tidy = df.melt(id_vars=["Shaft", "Total"], value_vars=month_columns, var_name="Month", value_name="Count")
-    tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
-
-    return (
-        alt.Chart(tidy)
-        .mark_rect()
-        .encode(
-            x=alt.X("Month:O", sort=month_columns, title="Month"),
-            y=alt.Y("Shaft:N", title="Shaft/Group"),
-            color=alt.Color("Count:Q", title="Total Expiries", scale=alt.Scale(scheme="reds")),
-            tooltip=["Shaft", "Month", "Count"],
-        )
-        .properties(width="container", height=min(max(1, len(df)) * 30, 800))
-    )
-
-
 def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(id_vars=["Shaft", "Total"], value_vars=month_columns, var_name="Month", value_name="Count")
     tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
@@ -612,6 +630,21 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
 # ============================================================
 # UI sections
 # ============================================================
+def render_sidebar_options() -> int:
+    st.sidebar.header("⚙️ Annual leave settings")
+    current_month = pd.Timestamp.now().month
+    selected_month_name = st.sidebar.selectbox(
+        "Annual leave roll-up month",
+        options=MONTH_NAMES,
+        index=current_month - 1,
+        help=(
+            "For annual leave only, this month will include all leave expiries due on or before the end "
+            "of the selected month. Default is the current calendar month."
+        ),
+    )
+    return MONTH_NAMES.index(selected_month_name) + 1
+
+
 def render_header() -> int:
     st.title(APP_TITLE)
     st.caption(APP_DESCRIPTION)
@@ -763,12 +796,6 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
 
 
 def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], year: int) -> None:
-    st.subheader("🔥 Monthly heat map per shaft/group")
-    if df.empty:
-        st.info("No data available to display the heat map.")
-    else:
-        st.altair_chart(build_detail_heatmap(df, month_columns), use_container_width=True)
-
     st.subheader(f"📈 Time series – {year}")
     if df.empty:
         st.info("No data available to display the time series.")
@@ -806,9 +833,6 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
 
     st.subheader("📋 Totals table")
     st.dataframe(totals_df, use_container_width=True)
-
-    st.subheader("🔥 Risk heat map")
-    st.altair_chart(build_totals_heatmap(totals_df, month_columns), use_container_width=True)
 
     st.subheader("📈 Time series of total expiries")
     filter_col, chart_col = st.columns([1, 2], gap="medium")
@@ -882,6 +906,7 @@ def render_downloads_dual(
 # Main app
 # ============================================================
 def main() -> None:
+    annual_leave_rollup_month = render_sidebar_options()
     selected_year = render_header()
     uploaded_file = st.file_uploader("📤 Upload the source XLSX workbook", type=["xlsx"])
 
@@ -897,6 +922,7 @@ def main() -> None:
         year=selected_year,
         designation_filter_mode="Both",
         critical_designations_selected=selected_critical_designations,
+        annual_leave_rollup_month=annual_leave_rollup_month,
     )
 
     result_critical, columns_out_critical, skipped_sheets_critical = build_result(
@@ -904,6 +930,7 @@ def main() -> None:
         year=selected_year,
         designation_filter_mode="Critical only",
         critical_designations_selected=selected_critical_designations,
+        annual_leave_rollup_month=annual_leave_rollup_month,
     )
 
     columns_out = columns_out_both
