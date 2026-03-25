@@ -13,7 +13,6 @@ import streamlit as st
 from openpyxl import Workbook
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-from openpyxl.utils import get_column_letter
 
 # ============================================================
 # Configuration
@@ -23,6 +22,7 @@ APP_DESCRIPTION: Final[str] = (
     "Upload a source workbook to generate expiry insights by shaft/group, "
     "filter by designation criticality, explore trends, and export production-ready outputs."
 )
+DEFAULT_YEAR: Final[int] = 2026
 VALID_YEAR_RANGE: Final[tuple[int, int]] = (1900, 2100)
 MONTH_NUMBERS: Final[list[int]] = list(range(1, 13))
 MONTH_NAMES: Final[list[str]] = [
@@ -103,15 +103,11 @@ def normalize_text(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
 
 
-def get_default_year() -> int:
-    return int(pd.Timestamp.now().year)
-
-
 def validate_year(year: int) -> int:
     min_year, max_year = VALID_YEAR_RANGE
     if min_year <= year <= max_year:
         return year
-    return get_default_year()
+    return DEFAULT_YEAR
 
 
 def find_first_header_row(df: pd.DataFrame, min_non_empty: int = 6, max_scan: int = 50) -> int:
@@ -221,58 +217,33 @@ def ensure_non_empty_group(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
     return df[df[group_col].notna() & (df[group_col].astype(str).str.strip() != "")].copy()
 
 
-def get_reporting_months(start_year: int, start_month: int) -> list[pd.Timestamp]:
-    start = pd.Timestamp(year=start_year, month=start_month, day=1)
-    return [start + pd.DateOffset(months=i) for i in range(12)]
-
-
-def get_reporting_month_keys_and_labels(start_year: int, start_month: int) -> tuple[list[str], list[str]]:
-    months = get_reporting_months(start_year, start_month)
-    keys = [month.strftime("%Y-%m") for month in months]
-    labels = [month.strftime("%b %Y") for month in months]
-    return keys, labels
-
-
-def get_reporting_title(start_year: int, start_month: int) -> str:
-    months = get_reporting_months(start_year, start_month)
-    start_label = months[0].strftime("%b %Y")
-    end_label = months[-1].strftime("%b %Y")
-    return f"{start_label} to {end_label}"
-
-
 def build_monthly_pivot(
     df: pd.DataFrame,
     group_col: str,
     expiry_date: pd.Series,
     legal_type: str,
-    reporting_month_keys: list[str],
+    year: int,
 ) -> pd.DataFrame:
     valid = df.loc[expiry_date.notna()].copy()
     if valid.empty:
-        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=reporting_month_keys, dtype=int)
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
         empty["Legal Type"] = legal_type
         return empty.reset_index().set_index(["Shaft", "Legal Type"])
 
     valid["_expiry_date"] = expiry_date.loc[expiry_date.notna()]
     valid = ensure_non_empty_group(valid, group_col)
-    if valid.empty:
-        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=reporting_month_keys, dtype=int)
-        empty["Legal Type"] = legal_type
-        return empty.reset_index().set_index(["Shaft", "Legal Type"])
-
-    valid["_month_key"] = valid["_expiry_date"].dt.strftime("%Y-%m")
-    valid = valid[valid["_month_key"].isin(reporting_month_keys)].copy()
+    valid = valid[valid["_expiry_date"].dt.year == year].copy()
 
     if valid.empty:
-        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=reporting_month_keys, dtype=int)
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
         empty["Legal Type"] = legal_type
         return empty.reset_index().set_index(["Shaft", "Legal Type"])
 
     pivot = (
-        valid.groupby([group_col, "_month_key"])
+        valid.groupby([group_col, valid["_expiry_date"].dt.month])
         .size()
         .unstack(fill_value=0)
-        .reindex(columns=reporting_month_keys, fill_value=0)
+        .reindex(columns=MONTH_NUMBERS, fill_value=0)
     )
     pivot.index.name = "Shaft"
     pivot["Legal Type"] = legal_type
@@ -287,14 +258,14 @@ def build_annual_leave_pivot(
     df: pd.DataFrame,
     group_col: str,
     last_leave_series: pd.Series,
-    reporting_months: list[pd.Timestamp],
-    reporting_month_keys: list[str],
+    year: int,
+    rollup_month: int,
 ) -> pd.DataFrame:
     expiry_date = compute_annual_leave_expiry(last_leave_series)
     valid = df.loc[expiry_date.notna()].copy()
 
     if valid.empty:
-        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=reporting_month_keys, dtype=int)
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
         empty["Legal Type"] = "Annual Leave Expiry"
         return empty.reset_index().set_index(["Shaft", "Legal Type"])
 
@@ -302,32 +273,29 @@ def build_annual_leave_pivot(
     valid = ensure_non_empty_group(valid, group_col)
 
     if valid.empty:
-        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=reporting_month_keys, dtype=int)
+        empty = pd.DataFrame(0, index=pd.Index([], name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
         empty["Legal Type"] = "Annual Leave Expiry"
         return empty.reset_index().set_index(["Shaft", "Legal Type"])
 
     shafts = sorted(valid[group_col].astype(str).unique().tolist())
-    pivot = pd.DataFrame(0, index=pd.Index(shafts, name="Shaft"), columns=reporting_month_keys, dtype=int)
+    pivot = pd.DataFrame(0, index=pd.Index(shafts, name="Shaft"), columns=MONTH_NUMBERS, dtype=int)
 
-    valid["_month_key"] = valid["_expiry_date"].dt.strftime("%Y-%m")
-    in_reporting_window = valid[valid["_month_key"].isin(reporting_month_keys)].copy()
-
-    if not in_reporting_window.empty:
+    # Normal monthly counts for the selected reporting year
+    yearly = valid[valid["_expiry_date"].dt.year == year].copy()
+    if not yearly.empty:
         monthly_counts = (
-            in_reporting_window.groupby([group_col, "_month_key"])
+            yearly.groupby([group_col, yearly["_expiry_date"].dt.month])
             .size()
             .unstack(fill_value=0)
-            .reindex(columns=reporting_month_keys, fill_value=0)
+            .reindex(columns=MONTH_NUMBERS, fill_value=0)
         )
-        for month_key in reporting_month_keys[1:]:
-            pivot.loc[monthly_counts.index, month_key] = monthly_counts[month_key].astype(int)
+        for month in MONTH_NUMBERS:
+            if month != rollup_month:
+                pivot.loc[monthly_counts.index, month] = monthly_counts[month].astype(int)
 
-    # The first month of the selected annual window is the roll-up month:
-    # count all annual leave expiries due on or before the end of that month.
-    rollup_month = reporting_months[0]
-    rollup_month_key = reporting_month_keys[0]
-    rollup_cutoff = rollup_month + pd.offsets.MonthEnd(0)
-
+    # Roll-up month:
+    # Count all annual leave expiries due on or before the end of the selected month
+    rollup_cutoff = pd.Timestamp(year=year, month=rollup_month, day=1) + pd.offsets.MonthEnd(0)
     rollup_counts = (
         valid[valid["_expiry_date"] <= rollup_cutoff]
         .groupby(group_col)
@@ -335,28 +303,24 @@ def build_annual_leave_pivot(
         .reindex(pivot.index, fill_value=0)
         .astype(int)
     )
-    pivot[rollup_month_key] = rollup_counts
+    pivot[rollup_month] = rollup_counts
 
     pivot["Legal Type"] = "Annual Leave Expiry"
     return pivot.reset_index().set_index(["Shaft", "Legal Type"])
 
 
-def finalize_result(
-    pivots: list[pd.DataFrame],
-    reporting_month_keys: list[str],
-    reporting_month_labels: list[str],
-) -> tuple[pd.DataFrame, list[str]]:
-    columns_out = [*reporting_month_labels, "Total"]
+def finalize_result(pivots: list[pd.DataFrame]) -> tuple[pd.DataFrame, list[str]]:
+    columns_out = [*MONTH_NAMES, "Total"]
     if not pivots:
         empty = pd.DataFrame(columns=["Shaft", "Legal Type", *columns_out])
         return empty, columns_out
 
     combined = pd.concat(pivots, axis=0).groupby(level=[0, 1]).sum()
-    combined = combined.reindex(columns=reporting_month_keys, fill_value=0)
+    combined = combined.reindex(columns=MONTH_NUMBERS, fill_value=0)
     combined["Total"] = combined.sum(axis=1)
 
-    rename_map = dict(zip(reporting_month_keys, reporting_month_labels))
-    combined = combined.rename(columns=rename_map).reset_index()
+    month_map = dict(zip(MONTH_NUMBERS, MONTH_NAMES))
+    combined = combined.rename(columns=month_map).reset_index()
     combined = combined[["Shaft", "Legal Type", *columns_out]]
 
     for column in columns_out:
@@ -390,17 +354,11 @@ def get_all_designations(file_bytes: bytes) -> list[str]:
 @st.cache_data(show_spinner="🔄 Reading and aggregating workbook…")
 def build_result(
     file_bytes: bytes,
-    report_start_year: int,
-    report_start_month: int,
+    year: int,
     designation_filter_mode: str,
     critical_designations_selected: tuple[str, ...],
-) -> tuple[pd.DataFrame, list[str], list[str], str]:
-    reporting_months = get_reporting_months(report_start_year, report_start_month)
-    reporting_month_keys, reporting_month_labels = get_reporting_month_keys_and_labels(
-        report_start_year, report_start_month
-    )
-    reporting_title = get_reporting_title(report_start_year, report_start_month)
-
+    annual_leave_rollup_month: int,
+) -> tuple[pd.DataFrame, list[str], list[str]]:
     excel_file = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
     pivots: list[pd.DataFrame] = []
     skipped_sheets: list[str] = []
@@ -420,24 +378,24 @@ def build_result(
             group_col = column_map["group"]
             if legal_type in {"COF Expiry", "Work Permit Expiry"}:
                 expiry_date = parse_dates(data[column_map["date"]])
-                pivots.append(build_monthly_pivot(data, group_col, expiry_date, legal_type, reporting_month_keys))
+                pivots.append(build_monthly_pivot(data, group_col, expiry_date, legal_type, year))
             elif legal_type == "Annual Leave Expiry":
                 last_leave_series = parse_dates(data[column_map["last_leave"]])
                 pivots.append(
                     build_annual_leave_pivot(
-                        data=data,
-                        group_col=group_col,
-                        last_leave_series=last_leave_series,
-                        reporting_months=reporting_months,
-                        reporting_month_keys=reporting_month_keys,
+                        data,
+                        group_col,
+                        last_leave_series,
+                        year,
+                        annual_leave_rollup_month,
                     )
                 )
         except Exception as exc:
             logger.warning("Skipping sheet '%s' because of processing error: %s", sheet_name, exc)
             skipped_sheets.append(sheet_name)
 
-    result, columns_out = finalize_result(pivots, reporting_month_keys, reporting_month_labels)
-    return result, columns_out, skipped_sheets, reporting_title
+    result, columns_out = finalize_result(pivots)
+    return result, columns_out, skipped_sheets
 
 
 # ============================================================
@@ -509,7 +467,7 @@ def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], reporting_title: str) -> bytes:
+def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], year: int) -> bytes:
     export_df = result_df.copy()
     if export_df.empty:
         export_df = pd.DataFrame(columns=["Shaft", "Legal Type", *columns_out])
@@ -523,13 +481,13 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], rep
 
     workbook = Workbook()
     worksheet = workbook.active
-    worksheet.title = "Legals"
+    worksheet.title = f"Legals {year}"
 
     headers = ["Shafts", "Legal type", *month_columns, total_column]
     last_column_index = len(headers)
 
     worksheet.merge_cells(start_row=1, start_column=2, end_row=1, end_column=last_column_index)
-    title_cell = worksheet.cell(row=1, column=2, value=f"Legals {reporting_title}")
+    title_cell = worksheet.cell(row=1, column=2, value=f"Legals {year}")
     title_cell.font = Font(size=14, bold=True)
     title_cell.alignment = Alignment(horizontal="center")
 
@@ -541,8 +499,8 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], rep
     worksheet.freeze_panes = "C3"
     worksheet.column_dimensions["A"].width = 28
     worksheet.column_dimensions["B"].width = 18
-    for column_index in range(3, last_column_index + 1):
-        worksheet.column_dimensions[get_column_letter(column_index)].width = 14
+    for column_letter in "CDEFGHIJKLMNO":
+        worksheet.column_dimensions[column_letter].width = 12
 
     thin_side = Side(border_style="thin", color="DDDDDD")
     border = Border(top=thin_side, bottom=thin_side, left=thin_side, right=thin_side)
@@ -615,12 +573,6 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], rep
     return output.getvalue()
 
 
-def sanitize_filename_part(value: str) -> str:
-    value = value.strip().replace(" ", "_")
-    value = re.sub(r"[^A-Za-z0-9_\-]+", "", value)
-    return value
-
-
 # ============================================================
 # Chart helpers
 # ============================================================
@@ -678,44 +630,34 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
 # ============================================================
 # UI sections
 # ============================================================
-def render_sidebar_options() -> tuple[int, int, str]:
-    st.sidebar.header("⚙️ Reporting period")
-
-    current_timestamp = pd.Timestamp.now()
-    default_year = int(current_timestamp.year)
-    default_month = int(current_timestamp.month)
-
-    selected_year = st.sidebar.number_input(
-        "Year of interest",
-        min_value=VALID_YEAR_RANGE[0],
-        max_value=VALID_YEAR_RANGE[1],
-        value=default_year,
-        step=1,
-        help="Select the starting year of the 12-month reporting window.",
-    )
-
+def render_sidebar_options() -> int:
+    st.sidebar.header("⚙️ Annual leave settings")
+    current_month = pd.Timestamp.now().month
     selected_month_name = st.sidebar.selectbox(
-        "Month of interest",
+        "Annual leave roll-up month",
         options=MONTH_NAMES,
-        index=default_month - 1,
+        index=current_month - 1,
         help=(
-            "Select the starting month of the 12-month reporting window. "
-            "This month is also used as the annual leave roll-up month."
+            "For annual leave only, this month will include all leave expiries due on or before the end "
+            "of the selected month. Default is the current calendar month."
         ),
     )
-    selected_month = MONTH_NAMES.index(selected_month_name) + 1
-    selected_year = validate_year(int(selected_year))
-
-    reporting_title = get_reporting_title(selected_year, selected_month)
-    st.sidebar.caption(f"Reporting window: **{reporting_title}**")
-
-    return selected_year, selected_month, reporting_title
+    return MONTH_NAMES.index(selected_month_name) + 1
 
 
-def render_header(reporting_title: str) -> None:
+def render_header() -> int:
     st.title(APP_TITLE)
     st.caption(APP_DESCRIPTION)
-    st.info(f"📅 Reporting period: {reporting_title}")
+
+    selected_year = st.number_input(
+        "📅 Year of interest",
+        min_value=VALID_YEAR_RANGE[0],
+        max_value=VALID_YEAR_RANGE[1],
+        value=DEFAULT_YEAR,
+        step=1,
+        help="Choose the reporting year that expiry counts should be mapped to.",
+    )
+    return validate_year(int(selected_year))
 
 
 def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
@@ -853,8 +795,8 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
     return grouped_result, output_filename
 
 
-def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporting_title: str) -> None:
-    st.subheader(f"📈 Time series – {reporting_title}")
+def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], year: int) -> None:
+    st.subheader(f"📈 Time series – {year}")
     if df.empty:
         st.info("No data available to display the time series.")
         return
@@ -881,8 +823,8 @@ def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporti
             st.altair_chart(build_detail_line_chart(filtered_df, month_columns), use_container_width=True)
 
 
-def render_totals_analysis(df: pd.DataFrame, month_columns: list[str], reporting_title: str) -> None:
-    st.header(f"📊 Total expiries per month ({reporting_title})")
+def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
+    st.header("📊 Total expiries per month (all legal types combined)")
     if df.empty:
         st.info("No data available to calculate total expiries.")
         return
@@ -912,7 +854,7 @@ def render_downloads_dual(
     df_both: pd.DataFrame,
     df_critical: pd.DataFrame,
     columns_out: list[str],
-    reporting_title: str,
+    year: int,
     csv_filename_both: str,
     csv_filename_critical: str,
 ) -> None:
@@ -922,7 +864,6 @@ def render_downloads_dual(
         return
 
     col_left, col_right = st.columns(2)
-    reporting_filename_part = sanitize_filename_part(reporting_title)
 
     with col_left:
         st.markdown("**All designations (Both)**")
@@ -933,11 +874,11 @@ def render_downloads_dual(
             mime="text/csv",
             use_container_width=True,
         )
-        xlsx_bytes_both = build_legals_xlsx_bytes(df_both, columns_out, reporting_title)
+        xlsx_bytes_both = build_legals_xlsx_bytes(df_both, columns_out, year)
         st.download_button(
-            label=f"Download Legals ({reporting_title}) (XLSX, Both)",
+            label=f"Download Legals {year} (XLSX, Both)",
             data=xlsx_bytes_both,
-            file_name=f"Legals_{reporting_filename_part}.xlsx",
+            file_name=f"Legals_{year}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -951,11 +892,11 @@ def render_downloads_dual(
             mime="text/csv",
             use_container_width=True,
         )
-        xlsx_bytes_crit = build_legals_xlsx_bytes(df_critical, columns_out, reporting_title)
+        xlsx_bytes_crit = build_legals_xlsx_bytes(df_critical, columns_out, year)
         st.download_button(
-            label=f"Download Legals ({reporting_title}) (XLSX, Critical only)",
+            label=f"Download Legals {year} (XLSX, Critical only)",
             data=xlsx_bytes_crit,
-            file_name=f"Legals_{reporting_filename_part}_CriticalOnly.xlsx",
+            file_name=f"Legals_{year}_CriticalOnly.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
@@ -965,9 +906,8 @@ def render_downloads_dual(
 # Main app
 # ============================================================
 def main() -> None:
-    report_start_year, report_start_month, reporting_title = render_sidebar_options()
-    render_header(reporting_title)
-
+    annual_leave_rollup_month = render_sidebar_options()
+    selected_year = render_header()
     uploaded_file = st.file_uploader("📤 Upload the source XLSX workbook", type=["xlsx"])
 
     if uploaded_file is None:
@@ -977,28 +917,26 @@ def main() -> None:
     file_bytes = uploaded_file.getvalue()
     selected_critical_designations = render_designation_filters(file_bytes)
 
-    result_both, columns_out_both, skipped_sheets_both, _ = build_result(
+    result_both, columns_out_both, skipped_sheets_both = build_result(
         file_bytes=file_bytes,
-        report_start_year=report_start_year,
-        report_start_month=report_start_month,
+        year=selected_year,
         designation_filter_mode="Both",
         critical_designations_selected=selected_critical_designations,
+        annual_leave_rollup_month=annual_leave_rollup_month,
     )
 
-    result_critical, columns_out_critical, skipped_sheets_critical, _ = build_result(
+    result_critical, columns_out_critical, skipped_sheets_critical = build_result(
         file_bytes=file_bytes,
-        report_start_year=report_start_year,
-        report_start_month=report_start_month,
+        year=selected_year,
         designation_filter_mode="Critical only",
         critical_designations_selected=selected_critical_designations,
+        annual_leave_rollup_month=annual_leave_rollup_month,
     )
 
     columns_out = columns_out_both
     month_columns = columns_out[:-1]
-
-    period_filename_part = f"{report_start_year}_{report_start_month:02d}_to_{(get_reporting_months(report_start_year, report_start_month)[-1]).year}_{(get_reporting_months(report_start_year, report_start_month)[-1]).month:02d}"
-    csv_filename_both = f"{period_filename_part}_expiries_by_shaft.csv"
-    csv_filename_critical = f"{period_filename_part}_expiries_by_shaft_critical_only.csv"
+    csv_filename_both = f"{selected_year}_expiries_by_shaft.csv"
+    csv_filename_critical = f"{selected_year}_expiries_by_shaft_critical_only.csv"
 
     skipped_all = sorted(set(skipped_sheets_both).union(skipped_sheets_critical))
     if skipped_all:
@@ -1012,7 +950,7 @@ def main() -> None:
 
     st.subheader("📋 Aggregated results")
     if result_both.empty:
-        st.warning("No matching expiry records were found for the selected reporting window.")
+        st.warning("No matching expiry records were found for the selected year.")
     else:
         search_term = st.text_input(
             "Search shafts / legal types",
@@ -1060,14 +998,14 @@ def main() -> None:
         else:
             csv_filename_critical_out = csv_filename_critical
 
-        render_detailed_analysis(result_to_show, month_columns, reporting_title)
-        render_totals_analysis(result_to_show, month_columns, reporting_title)
+        render_detailed_analysis(result_to_show, month_columns, selected_year)
+        render_totals_analysis(result_to_show, month_columns)
 
         render_downloads_dual(
             df_both=result_to_show,
             df_critical=df_critical_for_downloads,
             columns_out=columns_out,
-            reporting_title=reporting_title,
+            year=selected_year,
             csv_filename_both=csv_filename_both_out,
             csv_filename_critical=csv_filename_critical_out,
         )
