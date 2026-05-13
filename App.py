@@ -880,6 +880,7 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
 
 def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporting_period_label: str) -> None:
     st.subheader(f"Time Series: {reporting_period_label}")
+    st.write("The graph below depicts multiple types of expiries that will occur over the next year.")
     if df.empty:
         st.info("No data available to display the time series.")
         return
@@ -911,6 +912,7 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
     totals_df = build_totals_by_shaft(df, month_columns)
 
     st.subheader("Time Series of Aggregated Expiries (per Shaft)")
+    st.write("The graph below depicts the total number of expiries per shaft that will occur over the next year.")
     shaft_options = totals_df["Shaft"].tolist()
     default_selection = shaft_options[:5]
 
@@ -987,7 +989,7 @@ def main() -> None:
     render_header(reporting_period_label)
 
     consolidation_tab, analytics_tab = st.tabs(
-        ["Consolidation and Workbook Generation", "Analytics"]
+        ["Consolidation and Workbook Generation", "Time Series Analytics"]
     )
 
     with consolidation_tab:
