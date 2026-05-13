@@ -482,7 +482,7 @@ def init_group_state(shafts: list[str]) -> None:
 
     st.session_state.setdefault("group_defs", [])
 
-def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base_filename: str) -> tuple[pd.DataFrame, str]:
+def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base_filename: str, loaded_groups) -> tuple[pd.DataFrame, str]:
     grouping_enabled = st.radio(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
@@ -500,22 +500,21 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
     init_group_state(shafts)
 
     # ---- NEW: Apply loaded group definitions (only if none exist yet) ----
-    if not st.session_state.get("group_defs"):
-        loaded_groups = st.session_state.get("loaded_group_definitions", [])
-        if loaded_groups:
-            shaft_set = set(shafts)
-            filtered_groups: list[dict[str, object]] = []
-            for g in loaded_groups:
-                members = [str(m) for m in (g.get("members", []) or []) if str(m) in shaft_set]
-                filtered_groups.append(
-                    {
-                        "id": str(g.get("id") or uuid4()),
-                        "name": str(g.get("name") or "Unnamed Group"),
-                        "members": members,
-                    }
-                )
-            st.session_state.group_defs = filtered_groups
-
+    if loaded_groups is not None:
+        st.write(loaded_groups)
+        shaft_set = set(shafts)
+        filtered_groups: list[dict[str, object]] = []
+        for g in loaded_groups:
+            members = [str(m) for m in (g.get("members", []) or []) if str(m) in shaft_set]
+            filtered_groups.append(
+                {
+                    "id": str(g.get("id") or uuid4()),
+                    "name": str(g.get("name") or "Unnamed Group"),
+                    "members": members,
+                }
+            )
+        st.session_state.group_defs = filtered_groups
+    
     st.caption("Create one or more groups, assign shafts to each group, and optionally exclude shafts that remain ungrouped.")
 
     # ---- NEW: default checkbox state can come from loaded settings ----
@@ -587,7 +586,7 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
         output_filename = base_filename.replace(".csv", "_grouped.csv")
 
     grouped_result = aggregate_by_custom_groups(data_for_grouping, shaft_to_group, month_columns)
-    st.success("✅ Custom grouping applied.")
+    st.success("Custom grouping applied.")
     return grouped_result, output_filename
 
 
@@ -894,6 +893,8 @@ def render_sidebar_options() -> tuple[int, int]:
     )
 
     # ---- NEW: Upload saved critical/group settings ----
+    loaded_crit = None
+    loaded_groups = None
     with st.sidebar.expander("⚙️ Load critical/group settings", expanded=False):
         settings_file = st.file_uploader(
             "Upload settings file (.json)",
@@ -904,12 +905,6 @@ def render_sidebar_options() -> tuple[int, int]:
         if settings_file is not None:
             try:
                 crit, groups, exclude_ungrouped = parse_settings_json_bytes(settings_file.getvalue())
-                st.session_state["loaded_critical_designations"] = tuple(crit)
-                st.session_state["loaded_group_definitions"] = groups
-                st.session_state["loaded_exclude_ungrouped"] = bool(exclude_ungrouped)
-                st.sidebar.success("Settings loaded. They will apply when a workbook is uploaded.")
-                # Rerun so UI defaults (multiselect/grouping) reflect loaded settings immediately
-                st.rerun()
             except Exception as exc:
                 st.sidebar.error(f"Could not read settings file: {exc}")
 
@@ -920,7 +915,7 @@ def render_sidebar_options() -> tuple[int, int]:
                 f"Loaded: {len(loaded_crit)} critical designation(s), {len(loaded_groups)} group(s)."
             )
 
-    return validate_year(int(selected_year)), MONTH_NAMES.index(selected_month_name) + 1
+    return validate_year(int(selected_year)), MONTH_NAMES.index(selected_month_name) + 1, loaded_crit, loaded_groups
 
 
 def render_header(reporting_period_label: str) -> None:
@@ -929,11 +924,11 @@ def render_header(reporting_period_label: str) -> None:
     st.caption(f"📅 Reporting period: {reporting_period_label}")
 
 
-def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
+def render_designation_filters(file_bytes: bytes, loaded_crits) -> tuple[str, ...]:
     with st.expander("Designation Filter"):
         dataset_designations = get_all_designations(file_bytes)
 
-        loaded_critical = tuple(st.session_state.get("loaded_critical_designations", ()))
+        loaded_critical = tuple(loaded_crits)
 
         if loaded_critical:
             # Defaults = items in loaded list that exist in this workbook's designation set (case-insensitive)
@@ -1194,7 +1189,7 @@ def render_downloads_dual(
 # Main app
 # ============================================================
 def main() -> None:
-    selected_year, selected_month = render_sidebar_options()
+    selected_year, selected_month, loaded_crits, loaded_groups = render_sidebar_options()
     reporting_period_label = get_reporting_period_label(selected_year, selected_month)
     render_header(reporting_period_label)
 
@@ -1210,9 +1205,7 @@ def main() -> None:
             return
     
         file_bytes = uploaded_file.getvalue()
-        selected_critical_designations = render_designation_filters(file_bytes)
-
-        st.session_state["current_critical_designations"] = selected_critical_designations
+        selected_critical_designations = render_designation_filters(file_bytes, loaded_crits)
     
         result_both, columns_out_both, skipped_sheets_both = build_result(
             file_bytes=file_bytes,
@@ -1273,7 +1266,7 @@ def main() -> None:
                 st.dataframe(filtered_both, use_container_width=True)
     
             with st.expander("Optional Shaft Grouping"):
-                result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
+                result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both, loaded_groups)
     
                 st.write("### Resulting Dataset")
                 st.dataframe(result_to_show, use_container_width=True)
