@@ -941,6 +941,7 @@ def render_designation_filters(file_bytes: bytes, loaded_crits) -> tuple[str, ..
 
             defaults = sorted(set(selected_defaults), key=str.lower)
             loaded_extras = [x for x in loaded_critical if normalize_text(x) not in normalized_dataset]
+            selected_critical = loaded_crits
         else:
             defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
             loaded_extras = []
