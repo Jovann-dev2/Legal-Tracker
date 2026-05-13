@@ -914,8 +914,8 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
     shaft_options = totals_df["Shaft"].tolist()
     default_selection = shaft_options[:5]
 
-    selected_shafts = st.multiselect("Select shaft(s)/group(s)", options=shaft_options, default=default_selection)
-
+    selected_shafts = default_selection
+    
     if not selected_shafts:
         st.info("Select at least one shaft/group to display the chart.")
     else:
