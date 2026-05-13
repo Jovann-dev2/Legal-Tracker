@@ -863,8 +863,8 @@ def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporti
 
     control_col, chart_col = st.columns([1, 2], gap="medium")
     with control_col:
-        selected_shafts = st.multiselect("Groups/Shafts to plot", options=shafts, default=default_shafts)
-        selected_legal_types = st.multiselect("Expiry type(s)", options=legal_types, default=legal_types)
+        selected_shafts = default_shafts
+        selected_legal_types = legal_types
 
     filtered_df = df[
         df["Shaft"].astype(str).isin(selected_shafts) & df["Legal Type"].astype(str).isin(selected_legal_types)
