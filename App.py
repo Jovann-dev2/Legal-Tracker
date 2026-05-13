@@ -1280,7 +1280,13 @@ def main() -> None:
                 st.dataframe(filtered_both, use_container_width=True)
     
             with st.expander("Optional Shaft Grouping"):
-                result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both, loaded_groups)
+                loaded_groups = st.session_state.get("loaded_group_definitions", [])
+                result_to_show, csv_filename_both_out = render_grouping_section(
+                    filtered_both,
+                    month_columns,
+                    csv_filename_both,
+                    loaded_groups,
+                )
     
                 st.write("### Resulting Dataset")
                 st.dataframe(result_to_show, use_container_width=True)
