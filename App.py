@@ -628,9 +628,6 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
     tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
 
     # --- Interactive legend selection ---
-    # Clicking a legend item filters to that series.
-    # Shift+Click toggles multiple series on/off.
-    # Double-click clears back to "all".
     legend_sel = alt.selection_point(
         fields=["Series"],
         bind="legend",
@@ -648,7 +645,7 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
             x=alt.X("Month:O", sort=month_columns, title="Month"),
             y=alt.Y("Count:Q", title="Monthly Count"),
             color=alt.Color("Series:N", title="Series"),
-            opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.15)),
+            opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.05)),
             tooltip=[
                 alt.Tooltip("Shaft:N"),
                 alt.Tooltip("Legal Type:N"),
