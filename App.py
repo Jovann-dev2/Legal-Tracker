@@ -637,42 +637,22 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
         on="click",
         toggle="event.shiftKey",
         clear="dblclick",
-        empty="all",  # when nothing selected, show all series
+        empty="all",
     )
-
-    base = (
+    
+    chart = (
         alt.Chart(tidy)
         .add_params(legend_sel)
-        .transform_filter(legend_sel)
+        .mark_line(point=alt.OverlayMarkDef(size=60), strokeWidth=2)
         .encode(
             x=alt.X("Month:O", sort=month_columns, title="Month"),
             y=alt.Y("Count:Q", title="Monthly Count"),
             color=alt.Color("Series:N", title="Series"),
-            tooltip=[
-                alt.Tooltip("Shaft:N"),
-                alt.Tooltip("Legal Type:N"),
-                alt.Tooltip("Month:N"),
-                alt.Tooltip("Count:Q"),
-            ],
+            opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.15)),
+            tooltip=[...],
         )
         .properties(width="container", height=420)
     )
-
-    chart = (
-        base.mark_line(point=alt.OverlayMarkDef(size=60), strokeWidth=2)
-        .configure_legend(
-            orient="top",
-            direction="horizontal",
-            titleFontSize=12,
-            labelFontSize=11,
-            symbolStrokeWidth=3,
-        )
-        .configure_axis(
-            titleFontSize=12,
-            labelFontSize=11,
-        )
-    )
-
     return chart
 
 
