@@ -861,20 +861,17 @@ def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporti
         df.groupby("Shaft", as_index=False)["Total"].sum().sort_values("Total", ascending=False)["Shaft"].head(5).tolist()
     )
 
-    control_col, chart_col = st.columns([1, 2], gap="medium")
-    with control_col:
-        selected_shafts = default_shafts
-        selected_legal_types = legal_types
+    selected_shafts = default_shafts
+    selected_legal_types = legal_types
 
     filtered_df = df[
         df["Shaft"].astype(str).isin(selected_shafts) & df["Legal Type"].astype(str).isin(selected_legal_types)
     ].copy()
 
-    with chart_col:
-        if filtered_df.empty:
-            st.info("Adjust the filters to display a chart.")
-        else:
-            st.altair_chart(build_detail_line_chart(filtered_df, month_columns), use_container_width=True)
+    if filtered_df.empty:
+        st.info("Adjust the filters to display a chart.")
+    else:
+        st.altair_chart(build_detail_line_chart(filtered_df, month_columns), use_container_width=True)
 
 
 def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
