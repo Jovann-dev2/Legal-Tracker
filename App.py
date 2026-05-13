@@ -608,32 +608,57 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], yea
 # ============================================================
 # Chart helpers
 # ============================================================
-def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
+import pandas as pd
+import plotly.express as px
+
+
+def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]):
+    # reshape to long format
     tidy = df.melt(
         id_vars=["Shaft", "Legal Type", "Total"],
         value_vars=month_columns,
         var_name="Month",
         value_name="Count",
     )
-    tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
+
+    # ensure correct month order
+    tidy["Month"] = pd.Categorical(
+        tidy["Month"], categories=month_columns, ordered=True
+    )
+
+    # create legend series
     tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
 
-    return (
-        alt.Chart(tidy)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("Month:O", sort=month_columns, title="Month"),
-            y=alt.Y("Count:Q", title="Monthly Count"),
-            color=alt.Color("Series:N", title="Series"),
-            tooltip=[
-                alt.Tooltip("Shaft:N"),
-                alt.Tooltip("Legal Type:N"),
-                alt.Tooltip("Month:N"),
-                alt.Tooltip("Count:Q"),
-            ],
-        )
-        .properties(width="container", height=420)
+    # build plotly figure
+    fig = px.line(
+        tidy,
+        x="Month",
+        y="Count",
+        color="Series",
+        markers=True,
+        category_orders={"Month": month_columns},  # enforce order
+        labels={
+            "Month": "Month",
+            "Count": "Monthly Count",
+            "Series": "Series",
+        },
+        hover_data={
+            "Shaft": True,
+            "Legal Type": True,
+            "Month": True,
+            "Count": True,
+        },
     )
+
+    # layout tweaks (optional)
+    fig.update_layout(
+        height=420,
+        legend_title_text="Series",
+        xaxis_title="Month",
+        yaxis_title="Monthly Count",
+    )
+
+    return fig
 
 
 def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.DataFrame:
