@@ -941,109 +941,115 @@ def main() -> None:
     selected_year, selected_month = render_sidebar_options()
     reporting_period_label = get_reporting_period_label(selected_year, selected_month)
     render_header(reporting_period_label)
-    uploaded_file = st.file_uploader("📤 Upload the source XLSX workbook", type=["xlsx"])
 
-    if uploaded_file is None:
-        st.info("Please upload an XLSX file to begin.")
-        return
-
-    file_bytes = uploaded_file.getvalue()
-    selected_critical_designations = render_designation_filters(file_bytes)
-
-    result_both, columns_out_both, skipped_sheets_both = build_result(
-        file_bytes=file_bytes,
-        year=selected_year,
-        designation_filter_mode="Both",
-        critical_designations_selected=selected_critical_designations,
-        annual_leave_rollup_month=selected_month,
+    consolidation_tab, analytics_tab = st.tabs(
+        ["Consolidation and Workbook Generation", "Analytics"]
     )
 
-    result_critical, columns_out_critical, skipped_sheets_critical = build_result(
-        file_bytes=file_bytes,
-        year=selected_year,
-        designation_filter_mode="Critical only",
-        critical_designations_selected=selected_critical_designations,
-        annual_leave_rollup_month=selected_month,
-    )
-
-    columns_out = columns_out_both
-    month_columns = columns_out[:-1]
-    csv_filename_both = f"{selected_year}_expiries_by_shaft.csv"
-    csv_filename_critical = f"{selected_year}_expiries_by_shaft_critical_only.csv"
-
-    skipped_all = sorted(set(skipped_sheets_both).union(skipped_sheets_critical))
-    if skipped_all:
-        with st.expander("ℹ️ Workbook processing notes"):
-            st.write(
-                "Some sheets were skipped because they did not match the expected layout or could not be processed:"
-            )
-            st.write(", ".join(skipped_all))
-
-    render_summary_metrics(result_both, month_columns)
-
-    if result_both.empty:
-        st.warning("No matching expiry records were found for the selected reporting period.")
-    else:
-        with st.expander("Aggregated Results"):
-            search_term = st.text_input(
-                "Search shafts / legal types",
-                placeholder="Type part of a shaft or legal type to filter the table",
-            ).strip()
+    with consolidation_tab:
+        uploaded_file = st.file_uploader("📤 Upload the source XLSX workbook", type=["xlsx"])
     
-            filtered_both = result_both.copy()
-            filtered_critical = result_critical.copy()
+        if uploaded_file is None:
+            st.info("Please upload an XLSX file to begin.")
+            return
     
-            if search_term:
-                mask_both = (
-                    filtered_both["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
-                    | filtered_both["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
-                )
-                filtered_both = filtered_both[mask_both].copy()
+        file_bytes = uploaded_file.getvalue()
+        selected_critical_designations = render_designation_filters(file_bytes)
     
-                mask_crit = (
-                    filtered_critical["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
-                    | filtered_critical["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
-                )
-                filtered_critical = filtered_critical[mask_crit].copy()
-    
-            st.dataframe(filtered_both, use_container_width=True)
-
-        with st.expander("Optional Shaft Grouping"):
-            result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
-
-            st.write("### Resulting Dataset")
-            st.dataframe(result_to_show, use_container_width=True)
-
-        shaft_to_group, _ = get_group_conflicts(st.session_state.get("group_defs", []))
-        exclude_ungrouped_flag = bool(st.session_state.get("last_exclude_ungrouped", False))
-
-        df_critical_for_downloads = filtered_critical.copy()
-        if shaft_to_group:
-            if exclude_ungrouped_flag:
-                df_critical_for_downloads = df_critical_for_downloads[
-                    df_critical_for_downloads["Shaft"].astype(str).isin(shaft_to_group)
-                ].copy()
-                csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped_exclusive.csv")
-            else:
-                csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped.csv")
-            df_critical_for_downloads = aggregate_by_custom_groups(
-                df_critical_for_downloads, shaft_to_group, month_columns
-            )
-        else:
-            csv_filename_critical_out = csv_filename_critical
-
-        render_detailed_analysis(result_to_show, month_columns, reporting_period_label)
-        render_totals_analysis(result_to_show, month_columns)
-
-        render_downloads_dual(
-            df_both=result_to_show,
-            df_critical=df_critical_for_downloads,
-            columns_out=columns_out,
+        result_both, columns_out_both, skipped_sheets_both = build_result(
+            file_bytes=file_bytes,
             year=selected_year,
-            csv_filename_both=csv_filename_both_out,
-            csv_filename_critical=csv_filename_critical_out,
+            designation_filter_mode="Both",
+            critical_designations_selected=selected_critical_designations,
+            annual_leave_rollup_month=selected_month,
         )
+    
+        result_critical, columns_out_critical, skipped_sheets_critical = build_result(
+            file_bytes=file_bytes,
+            year=selected_year,
+            designation_filter_mode="Critical only",
+            critical_designations_selected=selected_critical_designations,
+            annual_leave_rollup_month=selected_month,
+        )
+    
+        columns_out = columns_out_both
+        month_columns = columns_out[:-1]
+        csv_filename_both = f"{selected_year}_expiries_by_shaft.csv"
+        csv_filename_critical = f"{selected_year}_expiries_by_shaft_critical_only.csv"
+    
+        skipped_all = sorted(set(skipped_sheets_both).union(skipped_sheets_critical))
+        if skipped_all:
+            with st.expander("ℹ️ Workbook processing notes"):
+                st.write(
+                    "Some sheets were skipped because they did not match the expected layout or could not be processed:"
+                )
+                st.write(", ".join(skipped_all))
+    
+        render_summary_metrics(result_both, month_columns)
+    
+        if result_both.empty:
+            st.warning("No matching expiry records were found for the selected reporting period.")
+        else:
+            with st.expander("Aggregated Results"):
+                search_term = st.text_input(
+                    "Search shafts / legal types",
+                    placeholder="Type part of a shaft or legal type to filter the table",
+                ).strip()
+        
+                filtered_both = result_both.copy()
+                filtered_critical = result_critical.copy()
+        
+                if search_term:
+                    mask_both = (
+                        filtered_both["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                        | filtered_both["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+                    )
+                    filtered_both = filtered_both[mask_both].copy()
+        
+                    mask_crit = (
+                        filtered_critical["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                        | filtered_critical["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+                    )
+                    filtered_critical = filtered_critical[mask_crit].copy()
+        
+                st.dataframe(filtered_both, use_container_width=True)
+    
+            with st.expander("Optional Shaft Grouping"):
+                result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
+    
+                st.write("### Resulting Dataset")
+                st.dataframe(result_to_show, use_container_width=True)
 
+            shaft_to_group, _ = get_group_conflicts(st.session_state.get("group_defs", []))
+            exclude_ungrouped_flag = bool(st.session_state.get("last_exclude_ungrouped", False))
+
+            df_critical_for_downloads = filtered_critical.copy()
+            if shaft_to_group:
+                if exclude_ungrouped_flag:
+                    df_critical_for_downloads = df_critical_for_downloads[
+                        df_critical_for_downloads["Shaft"].astype(str).isin(shaft_to_group)
+                    ].copy()
+                    csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped_exclusive.csv")
+                else:
+                    csv_filename_critical_out = csv_filename_critical.replace(".csv", "_grouped.csv")
+                df_critical_for_downloads = aggregate_by_custom_groups(
+                    df_critical_for_downloads, shaft_to_group, month_columns
+                )
+            else:
+                csv_filename_critical_out = csv_filename_critical
+
+            render_downloads_dual(
+                df_both=result_to_show,
+                df_critical=df_critical_for_downloads,
+                columns_out=columns_out,
+                year=selected_year,
+                csv_filename_both=csv_filename_both_out,
+                csv_filename_critical=csv_filename_critical_out,
+            )
+
+        with analytics_tab:
+            render_detailed_analysis(result_to_show, month_columns, reporting_period_label)
+            render_totals_analysis(result_to_show, month_columns)
 
 if __name__ == "__main__":
     main()
