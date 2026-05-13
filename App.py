@@ -911,19 +911,16 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
     totals_df = build_totals_by_shaft(df, month_columns)
 
     st.subheader("Time Series of Aggregated Expiries (per Shaft)")
-    filter_col, chart_col = st.columns([1, 2], gap="medium")
     shaft_options = totals_df["Shaft"].tolist()
     default_selection = shaft_options[:5]
 
-    with filter_col:
-        selected_shafts = st.multiselect("Select shaft(s)/group(s)", options=shaft_options, default=default_selection)
+    selected_shafts = st.multiselect("Select shaft(s)/group(s)", options=shaft_options, default=default_selection)
 
-    with chart_col:
-        if not selected_shafts:
-            st.info("Select at least one shaft/group to display the chart.")
-        else:
-            filtered_totals_df = totals_df[totals_df["Shaft"].isin(selected_shafts)].copy()
-            st.altair_chart(build_totals_line_chart(filtered_totals_df, month_columns), use_container_width=True)
+    if not selected_shafts:
+        st.info("Select at least one shaft/group to display the chart.")
+    else:
+        filtered_totals_df = totals_df[totals_df["Shaft"].isin(selected_shafts)].copy()
+        st.altair_chart(build_totals_line_chart(filtered_totals_df, month_columns), use_container_width=True)
 
 
 def render_downloads_dual(
