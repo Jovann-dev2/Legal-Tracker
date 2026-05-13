@@ -17,7 +17,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 # ============================================================
 # Configuration
 # ============================================================
-APP_TITLE: Final[str] = "🔎 Unavailability Insights"
+APP_TITLE: Final[str] = "Legal Tracker"
 APP_DESCRIPTION: Final[str] = (
     "Upload a source workbook to generate expiry insights by shaft/group, "
     "filter by designation criticality, explore trends, and export production-ready outputs."
@@ -663,7 +663,7 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
 # UI sections
 # ============================================================
 def render_sidebar_options() -> tuple[int, int]:
-    st.sidebar.header("⚙️ Reporting period")
+    st.sidebar.header("Reporting Period")
     current_date = pd.Timestamp.now()
 
     selected_year = st.sidebar.number_input(
@@ -694,30 +694,30 @@ def render_header(reporting_period_label: str) -> None:
 
 
 def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
-    st.subheader("🎯 Designation filter")
-    dataset_designations = get_all_designations(file_bytes)
-    defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
-
-    st.caption(
-        "Choose which designations count as critical. These will be used for the 'Critical only' output. "
-        "The 'Both' output ignores this list."
-    )
-    selected_critical = st.multiselect(
-        "Critical designations",
-        options=dataset_designations,
-        default=defaults,
-        help="These values are treated as the critical designation list for filtering.",
-    )
-    custom_values = st.text_area(
-        "Additional critical designations (optional)",
-        placeholder="One per line, or separate with commas / semicolons",
-        help="Use this if the workbook contains values not already listed above.",
-    )
-    if custom_values.strip():
-        extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
-        selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
-
-    selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
+    with st.expander("Designation Filter"):
+        dataset_designations = get_all_designations(file_bytes)
+        defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
+    
+        st.caption(
+            "Choose which designations count as critical. These will be used for the 'Critical only' output. "
+            "The 'Both' output ignores this list."
+        )
+        selected_critical = st.multiselect(
+            "Critical designations",
+            options=dataset_designations,
+            default=defaults,
+            help="These values are treated as the critical designation list for filtering.",
+        )
+        custom_values = st.text_area(
+            "Additional critical designations (optional)",
+            placeholder="One per line, or separate with commas / semicolons",
+            help="Use this if the workbook contains values not already listed above.",
+        )
+        if custom_values.strip():
+            extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
+            selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
+    
+        selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
     return selected_critical_tuple
 
 
@@ -739,7 +739,6 @@ def render_summary_metrics(df: pd.DataFrame, month_columns: list[str]) -> None:
 
 
 def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base_filename: str) -> tuple[pd.DataFrame, str]:
-    st.subheader("🧩 Optional shaft grouping")
     grouping_enabled = st.radio(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
@@ -982,37 +981,38 @@ def main() -> None:
 
     render_summary_metrics(result_both, month_columns)
 
-    st.subheader("📋 Aggregated results")
     if result_both.empty:
         st.warning("No matching expiry records were found for the selected reporting period.")
     else:
-        search_term = st.text_input(
-            "Search shafts / legal types",
-            placeholder="Type part of a shaft or legal type to filter the table",
-        ).strip()
+        with st.expander("Aggregated Results"):
+            search_term = st.text_input(
+                "Search shafts / legal types",
+                placeholder="Type part of a shaft or legal type to filter the table",
+            ).strip()
+    
+            filtered_both = result_both.copy()
+            filtered_critical = result_critical.copy()
+    
+            if search_term:
+                mask_both = (
+                    filtered_both["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                    | filtered_both["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+                )
+                filtered_both = filtered_both[mask_both].copy()
+    
+                mask_crit = (
+                    filtered_critical["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
+                    | filtered_critical["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
+                )
+                filtered_critical = filtered_critical[mask_crit].copy()
+    
+            st.dataframe(filtered_both, use_container_width=True)
 
-        filtered_both = result_both.copy()
-        filtered_critical = result_critical.copy()
+        with st.expander("Optional Shaft Grouping"):
+            result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
 
-        if search_term:
-            mask_both = (
-                filtered_both["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
-                | filtered_both["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
-            )
-            filtered_both = filtered_both[mask_both].copy()
-
-            mask_crit = (
-                filtered_critical["Shaft"].astype(str).str.contains(search_term, case=False, na=False)
-                | filtered_critical["Legal Type"].astype(str).str.contains(search_term, case=False, na=False)
-            )
-            filtered_critical = filtered_critical[mask_crit].copy()
-
-        st.dataframe(filtered_both, use_container_width=True)
-
-        result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
-
-        st.subheader("📋 Final result set")
-        st.dataframe(result_to_show, use_container_width=True)
+            st.write("### Resulting Dataset")
+            st.dataframe(result_to_show, use_container_width=True)
 
         shaft_to_group, _ = get_group_conflicts(st.session_state.get("group_defs", []))
         exclude_ungrouped_flag = bool(st.session_state.get("last_exclude_ungrouped", False))
