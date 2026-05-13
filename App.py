@@ -609,10 +609,6 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], yea
 # Chart helpers
 # ============================================================
 
-import pandas as pd
-import altair as alt
-
-
 def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(
         id_vars=["Shaft", "Legal Type", "Total"],
@@ -663,22 +659,55 @@ def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.Data
     totals["Total"] = totals[month_columns].sum(axis=1).astype(int)
     return totals.sort_values("Total", ascending=False).reset_index(drop=True)
 
-
 def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
-    tidy = df.melt(id_vars=["Shaft", "Total"], value_vars=month_columns, var_name="Month", value_name="Count")
+    tidy = df.melt(
+        id_vars=["Shaft", "Total"],
+        value_vars=month_columns,
+        var_name="Month",
+        value_name="Count",
+    )
     tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
 
-    return (
+    # Interactive legend selection (click legend to highlight series)
+    legend_sel = alt.selection_point(
+        fields=["Shaft"],
+        bind="legend",
+        on="click",
+        toggle="event.shiftKey",   # Shift+Click for multi-select
+        clear="dblclick",          # Double-click to reset to show all
+        empty="all",               # If nothing selected, everything is fully visible
+    )
+
+    chart = (
         alt.Chart(tidy)
-        .mark_line(point=True)
+        .add_params(legend_sel)
+        .mark_line(point=alt.OverlayMarkDef(size=60), strokeWidth=2)
         .encode(
             x=alt.X("Month:O", sort=month_columns, title="Month"),
             y=alt.Y("Count:Q", title="Total Expiries"),
             color=alt.Color("Shaft:N", title="Shaft/Group"),
-            tooltip=["Shaft", "Month", "Count"],
+            opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.15)),
+            tooltip=[
+                alt.Tooltip("Shaft:N"),
+                alt.Tooltip("Month:N"),
+                alt.Tooltip("Count:Q"),
+            ],
         )
         .properties(width="container", height=420)
+        .configure_legend(
+            orient="top",
+            direction="horizontal",
+            titleFontSize=12,
+            labelFontSize=11,
+            symbolStrokeWidth=3,
+        )
+        .configure_axis(
+            titleFontSize=12,
+            labelFontSize=11,
+        )
     )
+
+    return chart
 
 
 # ============================================================
