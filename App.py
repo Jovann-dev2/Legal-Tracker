@@ -616,23 +616,12 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
         var_name="Month",
         value_name="Count",
     )
-
-    # Ensure month ordering
     tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
     tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
 
-    # Legend-driven multi-select: click legend items to toggle visibility.
-    # empty="all" ensures everything shows initially.
-    legend_sel = alt.selection_point(
-        fields=["Series"],
-        bind="legend",
-        empty="all",
-        toggle=True,     # click toggles series on/off
-        clear="dblclick" # double-click clears selection (shows all)
-    )
-
-    base = (
+    return (
         alt.Chart(tidy)
+        .mark_line(point=True)
         .encode(
             x=alt.X("Month:O", sort=month_columns, title="Month"),
             y=alt.Y("Count:Q", title="Monthly Count"),
@@ -644,40 +633,8 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
                 alt.Tooltip("Count:Q"),
             ],
         )
-    )
-
-    # Make non-selected series faint (or effectively hidden)
-    # If you want them fully hidden, set alt.value(0) instead of 0.08
-    lines = (
-        base.mark_line(point=True)
-        .add_params(legend_sel)
-        .encode(
-            opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.08)),
-            strokeWidth=alt.condition(legend_sel, alt.value(2.2), alt.value(1.2)),
-        )
-    )
-
-    # Chart-level formatting similar to your Plotly example
-    chart = (
-        lines
         .properties(width="container", height=420)
-        .configure_legend(
-            orient="top",
-            direction="horizontal",
-            titleOrient="left",
-            padding=10,
-            labelLimit=260,         # helps with long series names
-            symbolStrokeWidth=3
-        )
-        .configure_axis(
-            labelFontSize=11,
-            titleFontSize=12,
-            grid=True
-        )
-        .configure_view(stroke=None)  # clean frame
     )
-
-    return chart
 
 
 def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.DataFrame:
