@@ -955,13 +955,6 @@ def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
             "The 'Both' output ignores this list."
         )
 
-        selected_critical = st.multiselect(
-            "Critical designations",
-            options=dataset_designations,
-            default=defaults,
-            help="These values are treated as the critical designation list for filtering.",
-        )
-
         # ---- NEW: preload any extras from settings into the text area ----
         custom_values = st.text_area(
             "Additional critical designations (optional)",
@@ -972,6 +965,13 @@ def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
         if custom_values.strip():
             extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
             selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
+
+        selected_critical = st.multiselect(
+            "Critical designations",
+            options=dataset_designations,
+            default=selected_critical,
+            help="These values are treated as the critical designation list for filtering.",
+        )
 
         selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
 
