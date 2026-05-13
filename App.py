@@ -482,7 +482,12 @@ def init_group_state(shafts: list[str]) -> None:
 
     st.session_state.setdefault("group_defs", [])
 
-def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base_filename: str, loaded_groups) -> tuple[pd.DataFrame, str]:
+def render_grouping_section(
+    result: pd.DataFrame,
+    month_columns: list[str],
+    base_filename: str,
+    loaded_groups,
+) -> tuple[pd.DataFrame, str]:
     grouping_enabled = st.radio(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
@@ -499,12 +504,17 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
     shafts = sorted(result["Shaft"].astype(str).dropna().unique().tolist())
     init_group_state(shafts)
 
-    # ---- NEW: Apply loaded group definitions (only if none exist yet) ----
-    if loaded_groups is not None:
-        st.write(loaded_groups)
+    # ---- Apply loaded group definitions ONLY if session has no groups yet ----
+    # loaded_groups typically comes in as [] when not provided, so treat [] as "no load".
+    if loaded_groups and not st.session_state.get("group_defs"):
         shaft_set = set(shafts)
         filtered_groups: list[dict[str, object]] = []
+
         for g in loaded_groups:
+            # Defensive: skip non-dicts gracefully
+            if not isinstance(g, dict):
+                continue
+
             members = [str(m) for m in (g.get("members", []) or []) if str(m) in shaft_set]
             filtered_groups.append(
                 {
@@ -513,11 +523,14 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
                     "members": members,
                 }
             )
-        st.session_state.group_defs = filtered_groups
-    
-    st.caption("Create one or more groups, assign shafts to each group, and optionally exclude shafts that remain ungrouped.")
 
-    # ---- NEW: default checkbox state can come from loaded settings ----
+        st.session_state.group_defs = filtered_groups
+
+    st.caption(
+        "Create one or more groups, assign shafts to each group, and optionally exclude shafts that remain ungrouped."
+    )
+
+    # (Leaving your existing exclude-default logic unchanged)
     exclude_default = bool(st.session_state.get("loaded_exclude_ungrouped", False))
     exclude_ungrouped = st.checkbox(
         "Exclude ungrouped shafts",
