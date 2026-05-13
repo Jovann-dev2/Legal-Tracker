@@ -609,6 +609,10 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], yea
 # Chart helpers
 # ============================================================
 
+import pandas as pd
+import altair as alt
+
+
 def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(
         id_vars=["Shaft", "Legal Type", "Total"],
@@ -616,12 +620,30 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
         var_name="Month",
         value_name="Count",
     )
+
+    # Ensure month order is preserved
     tidy["Month"] = pd.Categorical(tidy["Month"], categories=month_columns, ordered=True)
+
+    # Create a single series label for coloring & legend entries
     tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
 
-    return (
+    # --- Interactive legend selection ---
+    # Clicking a legend item filters to that series.
+    # Shift+Click toggles multiple series on/off.
+    # Double-click clears back to "all".
+    legend_sel = alt.selection_point(
+        fields=["Series"],
+        bind="legend",
+        on="click",
+        toggle="event.shiftKey",
+        clear="dblclick",
+        empty="all",  # when nothing selected, show all series
+    )
+
+    base = (
         alt.Chart(tidy)
-        .mark_line(point=True)
+        .add_params(legend_sel)
+        .transform_filter(legend_sel)
         .encode(
             x=alt.X("Month:O", sort=month_columns, title="Month"),
             y=alt.Y("Count:Q", title="Monthly Count"),
@@ -635,6 +657,23 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
         )
         .properties(width="container", height=420)
     )
+
+    chart = (
+        base.mark_line(point=alt.OverlayMarkDef(size=60), strokeWidth=2)
+        .configure_legend(
+            orient="top",
+            direction="horizontal",
+            titleFontSize=12,
+            labelFontSize=11,
+            symbolStrokeWidth=3,
+        )
+        .configure_axis(
+            titleFontSize=12,
+            labelFontSize=11,
+        )
+    )
+
+    return chart
 
 
 def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.DataFrame:
