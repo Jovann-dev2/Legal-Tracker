@@ -828,7 +828,7 @@ def render_grouping_section(result: pd.DataFrame, month_columns: list[str], base
 
 
 def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporting_period_label: str) -> None:
-    st.subheader(f"📈 Time series – {reporting_period_label}")
+    st.subheader(f"Time Series: {reporting_period_label}")
     if df.empty:
         st.info("No data available to display the time series.")
         return
@@ -856,17 +856,13 @@ def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporti
 
 
 def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
-    st.header("📊 Total expiries per month (all legal types combined)")
     if df.empty:
         st.info("No data available to calculate total expiries.")
         return
 
     totals_df = build_totals_by_shaft(df, month_columns)
 
-    st.subheader("📋 Totals table")
-    st.dataframe(totals_df, use_container_width=True)
-
-    st.subheader("📈 Time series of total expiries")
+    st.subheader("Time Series of Aggregated Expiries (per Shaft)")
     filter_col, chart_col = st.columns([1, 2], gap="medium")
     shaft_options = totals_df["Shaft"].tolist()
     default_selection = shaft_options[:5]
@@ -890,25 +886,28 @@ def render_downloads_dual(
     csv_filename_both: str,
     csv_filename_critical: str,
 ) -> None:
-    st.subheader("⬇️ Downloads")
+    st.subheader("Downloads")
     if df_both.empty and df_critical.empty:
         st.info("No data available to export.")
         return
+    else:
+        st.write("Below please find nicely-formatted legal tracking data.")
 
     col_left, col_right = st.columns(2)
 
     with col_left:
-        st.markdown("**All designations (Both)**")
-        st.download_button(
-            label="Download aggregated CSV (Both)",
-            data=dataframe_to_csv_bytes(df_both),
-            file_name=csv_filename_both,
-            mime="text/csv",
-            use_container_width=True,
-        )
+        st.markdown("**All Designations**")
+        # If a CSV is wanted, the following can be used:
+        # st.download_button(
+        #     label="Download aggregated CSV",
+        #     data=dataframe_to_csv_bytes(df_both),
+        #     file_name=csv_filename_both,
+        #     mime="text/csv",
+        #     use_container_width=True,
+        # )
         xlsx_bytes_both = build_legals_xlsx_bytes(df_both, columns_out, year)
         st.download_button(
-            label=f"Download Legals {year} (XLSX, Both)",
+            label=f"Legals {year} (All Designations)",
             data=xlsx_bytes_both,
             file_name=f"Legals_{year}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -916,23 +915,23 @@ def render_downloads_dual(
         )
 
     with col_right:
-        st.markdown("**Critical only**")
-        st.download_button(
-            label="Download aggregated CSV (Critical only)",
-            data=dataframe_to_csv_bytes(df_critical),
-            file_name=csv_filename_critical,
-            mime="text/csv",
-            use_container_width=True,
-        )
+        st.markdown("**Critical Designations Only**")
+        # If a CSV is wanted, the following can be used:
+        # st.download_button(
+        #    label="Download aggregated CSV (Critical only)",
+        #     data=dataframe_to_csv_bytes(df_critical),
+        #     file_name=csv_filename_critical,
+        #     mime="text/csv",
+        #     use_container_width=True,
+        # )
         xlsx_bytes_crit = build_legals_xlsx_bytes(df_critical, columns_out, year)
         st.download_button(
-            label=f"Download Legals {year} (XLSX, Critical only)",
+            label=f"Legals {year} (Critical Designations)",
             data=xlsx_bytes_crit,
             file_name=f"Legals_{year}_CriticalOnly.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
 
 # ============================================================
 # Main app
