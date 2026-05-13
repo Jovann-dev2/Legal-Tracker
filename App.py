@@ -940,7 +940,7 @@ def render_grouping_section(
     st.caption("Create one or more groups, assign shafts to each group, and optionally exclude shafts that remain ungrouped.")
     exclude_ungrouped = st.checkbox(
         "Exclude ungrouped shafts",
-        value=value=bool(preloaded_exclude_ungrouped) if preloaded_exclude_ungrouped is not None else False,
+        value=bool(preloaded_exclude_ungrouped) if preloaded_exclude_ungrouped is not None else False,
         help="When enabled, only shafts explicitly assigned to a custom group are included in the aggregated output.",
     )
     st.session_state["last_exclude_ungrouped"] = bool(exclude_ungrouped)
