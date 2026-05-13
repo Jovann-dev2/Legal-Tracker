@@ -4,7 +4,6 @@ import logging
 import re
 from dataclasses import dataclass
 from io import BytesIO
-import json
 from typing import Final
 from uuid import uuid4
 
@@ -482,126 +481,6 @@ def init_group_state(shafts: list[str]) -> None:
 
     st.session_state.setdefault("group_defs", [])
 
-def render_grouping_section(
-    result: pd.DataFrame,
-    month_columns: list[str],
-    base_filename: str,
-    loaded_groups,
-) -> tuple[pd.DataFrame, str]:
-    grouping_enabled = st.radio(
-        "Would you like to combine shaft names into custom groups?",
-        options=["No", "Yes"],
-        horizontal=True,
-    )
-
-    result_to_show = result.copy()
-    output_filename = base_filename
-
-    if grouping_enabled == "No" or result.empty:
-        st.session_state["last_exclude_ungrouped"] = False
-        return result_to_show, output_filename
-
-    shafts = sorted(result["Shaft"].astype(str).dropna().unique().tolist())
-    init_group_state(shafts)
-
-    # ---- Apply loaded group definitions ONLY if session has no groups yet ----
-    # loaded_groups typically comes in as [] when not provided, so treat [] as "no load".
-    if loaded_groups and not st.session_state.get("group_defs"):
-        shaft_set = set(shafts)
-        filtered_groups: list[dict[str, object]] = []
-
-        for g in loaded_groups:
-            # Defensive: skip non-dicts gracefully
-            if not isinstance(g, dict):
-                continue
-
-            members = [str(m) for m in (g.get("members", []) or []) if str(m) in shaft_set]
-            filtered_groups.append(
-                {
-                    "id": str(g.get("id") or uuid4()),
-                    "name": str(g.get("name") or "Unnamed Group"),
-                    "members": members,
-                }
-            )
-
-        st.session_state.group_defs = filtered_groups
-
-    st.caption(
-        "Create one or more groups, assign shafts to each group, and optionally exclude shafts that remain ungrouped."
-    )
-
-    # (Leaving your existing exclude-default logic unchanged)
-    exclude_default = bool(st.session_state.get("loaded_exclude_ungrouped", False))
-    exclude_ungrouped = st.checkbox(
-        "Exclude ungrouped shafts",
-        value=exclude_default,
-        help="When enabled, only shafts explicitly assigned to a custom group are included in the aggregated output.",
-    )
-    st.session_state["last_exclude_ungrouped"] = bool(exclude_ungrouped)
-
-    if not st.session_state.group_defs:
-        st.info("No custom groups yet.")
-        st.button("➕ Add first group", on_click=add_group_definition)
-
-    group_to_remove_index: int | None = None
-
-    for index, group_def in enumerate(st.session_state.group_defs):
-        with st.expander(f"Group {index + 1}", expanded=(index == 0)):
-            group_name = st.text_input(
-                f"Group name {index + 1}",
-                value=group_def["name"],
-                key=f"group_name_{group_def['id']}",
-            )
-            group_members = st.multiselect(
-                f"Members for {group_name or group_def['name']}",
-                options=shafts,
-                default=group_def["members"],
-                key=f"group_members_{group_def['id']}",
-            )
-            group_def["name"] = group_name or f"Group {index + 1}"
-            group_def["members"] = group_members
-
-            action_col1, action_col2, _ = st.columns([1, 1, 4])
-            with action_col1:
-                if st.button("🗑️ Remove", key=f"remove_{group_def['id']}"):
-                    group_to_remove_index = index
-            with action_col2:
-                st.button("➕ Add another", key=f"add_after_{group_def['id']}", on_click=add_group_definition)
-
-    if group_to_remove_index is not None:
-        st.session_state.group_defs.pop(group_to_remove_index)
-        st.rerun()
-
-    if st.session_state.group_defs:
-        st.button("➕ Add another group", on_click=add_group_definition, key="add_group_bottom")
-
-    shaft_to_group, conflicts = get_group_conflicts(st.session_state.group_defs)
-    if conflicts:
-        st.error(
-            "The following shafts are assigned to more than one group: "
-            + ", ".join(conflicts)
-            + ". Please fix the overlap before proceeding."
-        )
-        return result_to_show, output_filename
-
-    if not shaft_to_group:
-        if exclude_ungrouped:
-            st.info("No grouped shafts selected and exclusion is enabled, so the current result is empty.")
-            return result.head(0).copy(), output_filename
-        st.info("No grouped shafts selected. Showing original results.")
-        return result_to_show, output_filename
-
-    data_for_grouping = result.copy()
-    if exclude_ungrouped:
-        data_for_grouping = data_for_grouping[data_for_grouping["Shaft"].astype(str).isin(shaft_to_group)]
-        output_filename = base_filename.replace(".csv", "_grouped_exclusive.csv")
-    else:
-        output_filename = base_filename.replace(".csv", "_grouped.csv")
-
-    grouped_result = aggregate_by_custom_groups(data_for_grouping, shaft_to_group, month_columns)
-    st.success("Custom grouping applied.")
-    return grouped_result, output_filename
-
 
 def add_group_definition() -> None:
     st.session_state.group_defs.append(
@@ -830,54 +709,6 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
 
     return chart
 
-# ============================================================
-# Settings (Critical designations + Groupings) import/export
-# ============================================================
-
-SETTINGS_SCHEMA_VERSION: Final[int] = 1
-SETTINGS_DOWNLOAD_NAME: Final[str] = "legal_tracker_settings.json"
-
-
-def build_settings_json_bytes(
-    critical_designations: tuple[str, ...] | list[str] | None,
-    group_definitions: list[dict[str, object]] | None,
-    exclude_ungrouped: bool | None = None,
-) -> bytes:
-    payload = {
-        "schema_version": SETTINGS_SCHEMA_VERSION,
-        "critical_designations": list(critical_designations or []),
-        "group_definitions": list(group_definitions or []),
-        "exclude_ungrouped": bool(exclude_ungrouped) if exclude_ungrouped is not None else False,
-    }
-    return json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
-
-
-def parse_settings_json_bytes(raw: bytes) -> tuple[list[str], list[dict[str, object]], bool]:
-    data = json.loads(raw.decode("utf-8"))
-
-    critical = data.get("critical_designations") or []
-    groups = data.get("group_definitions") or []
-    exclude_ungrouped = bool(data.get("exclude_ungrouped", False))
-
-    if not isinstance(critical, list):
-        critical = []
-    if not isinstance(groups, list):
-        groups = []
-
-    # Keep group records only if they look like dicts with expected keys
-    cleaned_groups: list[dict[str, object]] = []
-    for g in groups:
-        if isinstance(g, dict):
-            cleaned_groups.append(
-                {
-                    "id": str(g.get("id") or uuid4()),
-                    "name": str(g.get("name") or "Unnamed Group"),
-                    "members": list(g.get("members") or []),
-                }
-            )
-
-    critical_clean = [str(x).strip() for x in critical if str(x).strip()]
-    return critical_clean, cleaned_groups, exclude_ungrouped
 
 # ============================================================
 # UI sections
@@ -904,31 +735,7 @@ def render_sidebar_options() -> tuple[int, int]:
             "in the selected year."
         ),
     )
-
-    # ---- NEW: Upload saved critical/group settings ----
-    loaded_crit = None
-    loaded_groups = None
-    with st.sidebar.expander("⚙️ Load critical/group settings", expanded=False):
-        settings_file = st.file_uploader(
-            "Upload settings file (.json)",
-            type=["json"],
-            key="settings_file_uploader",
-            help="Upload a previously downloaded settings file to restore critical designations and groupings.",
-        )
-        if settings_file is not None:
-            try:
-                crit, groups, exclude_ungrouped = parse_settings_json_bytes(settings_file.getvalue())
-            except Exception as exc:
-                st.sidebar.error(f"Could not read settings file: {exc}")
-
-        loaded_crit = st.session_state.get("loaded_critical_designations", ())
-        loaded_groups = st.session_state.get("loaded_group_definitions", [])
-        if loaded_crit or loaded_groups:
-            st.caption(
-                f"Loaded: {len(loaded_crit)} critical designation(s), {len(loaded_groups)} group(s)."
-            )
-
-    return validate_year(int(selected_year)), MONTH_NAMES.index(selected_month_name) + 1, loaded_crit, loaded_groups
+    return validate_year(int(selected_year)), MONTH_NAMES.index(selected_month_name) + 1
 
 
 def render_header(reporting_period_label: str) -> None:
@@ -937,53 +744,31 @@ def render_header(reporting_period_label: str) -> None:
     st.caption(f"📅 Reporting period: {reporting_period_label}")
 
 
-def render_designation_filters(file_bytes: bytes, loaded_crits) -> tuple[str, ...]:
+def render_designation_filters(file_bytes: bytes) -> tuple[str, ...]:
     with st.expander("Designation Filter"):
         dataset_designations = get_all_designations(file_bytes)
-
-        loaded_critical = tuple(loaded_crits)
-
-        if loaded_critical:
-            # Defaults = items in loaded list that exist in this workbook's designation set (case-insensitive)
-            normalized_dataset = {normalize_text(x): x for x in dataset_designations}
-            selected_defaults = []
-            for item in loaded_critical:
-                key = normalize_text(item)
-                if key in normalized_dataset:
-                    selected_defaults.append(normalized_dataset[key])
-
-            defaults = sorted(set(selected_defaults), key=str.lower)
-            loaded_extras = [x for x in loaded_critical if normalize_text(x) not in normalized_dataset]
-            selected_critical = loaded_crits
-        else:
-            defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
-            loaded_extras = []
-
+        defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
+    
         st.caption(
             "Choose which designations count as critical. These will be used for the 'Critical only' output. "
             "The 'Both' output ignores this list."
         )
-
-        # ---- NEW: preload any extras from settings into the text area ----
+        selected_critical = st.multiselect(
+            "Critical designations",
+            options=dataset_designations,
+            default=defaults,
+            help="These values are treated as the critical designation list for filtering.",
+        )
         custom_values = st.text_area(
             "Additional critical designations (optional)",
-            value="\n".join(loaded_extras) if loaded_extras else "",
             placeholder="One per line, or separate with commas / semicolons",
             help="Use this if the workbook contains values not already listed above.",
         )
         if custom_values.strip():
             extras = [item.strip() for item in re.split(r"[,;\n]+", custom_values) if item.strip()]
             selected_critical = sorted(set(selected_critical).union(extras), key=str.lower)
-
-        selected_critical = st.multiselect(
-            "Critical designations",
-            options=dataset_designations,
-            default=selected_critical,
-            help="These values are treated as the critical designation list for filtering.",
-        )
-
+    
         selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
-
     return selected_critical_tuple
 
 
@@ -1148,26 +933,6 @@ def render_downloads_dual(
     csv_filename_both: str,
     csv_filename_critical: str,
 ) -> None:
-    # ---- NEW: Settings download button (before "Downloads") ----
-    critical_now = tuple(st.session_state.get("current_critical_designations", ()))
-    group_defs_now = list(st.session_state.get("group_defs", []))
-    exclude_now = bool(st.session_state.get("last_exclude_ungrouped", False))
-
-    if critical_now or group_defs_now:
-        settings_bytes = build_settings_json_bytes(
-            critical_designations=critical_now,
-            group_definitions=group_defs_now,
-            exclude_ungrouped=exclude_now,
-        )
-        st.download_button(
-            label="⬇️ Download critical/group settings",
-            data=settings_bytes,
-            file_name=SETTINGS_DOWNLOAD_NAME,
-            mime="application/json",
-            use_container_width=True,
-            help="Download a settings file containing critical designations and shaft groupings (if defined).",
-        )
-
     st.subheader("Downloads")
     if df_both.empty and df_critical.empty:
         st.info("No data available to export.")
@@ -1179,6 +944,14 @@ def render_downloads_dual(
 
     with col_left:
         st.markdown("**All Designations**")
+        # If a CSV is wanted, the following can be used:
+        # st.download_button(
+        #     label="Download aggregated CSV",
+        #     data=dataframe_to_csv_bytes(df_both),
+        #     file_name=csv_filename_both,
+        #     mime="text/csv",
+        #     use_container_width=True,
+        # )
         xlsx_bytes_both = build_legals_xlsx_bytes(df_both, columns_out, year)
         st.download_button(
             label=f"Legals {year} (All Designations)",
@@ -1190,6 +963,14 @@ def render_downloads_dual(
 
     with col_right:
         st.markdown("**Critical Designations Only**")
+        # If a CSV is wanted, the following can be used:
+        # st.download_button(
+        #    label="Download aggregated CSV (Critical only)",
+        #     data=dataframe_to_csv_bytes(df_critical),
+        #     file_name=csv_filename_critical,
+        #     mime="text/csv",
+        #     use_container_width=True,
+        # )
         xlsx_bytes_crit = build_legals_xlsx_bytes(df_critical, columns_out, year)
         st.download_button(
             label=f"Legals {year} (Critical Designations)",
@@ -1203,7 +984,7 @@ def render_downloads_dual(
 # Main app
 # ============================================================
 def main() -> None:
-    selected_year, selected_month, loaded_crits, loaded_groups = render_sidebar_options()
+    selected_year, selected_month = render_sidebar_options()
     reporting_period_label = get_reporting_period_label(selected_year, selected_month)
     render_header(reporting_period_label)
 
@@ -1219,7 +1000,7 @@ def main() -> None:
             return
     
         file_bytes = uploaded_file.getvalue()
-        selected_critical_designations = render_designation_filters(file_bytes, loaded_crits)
+        selected_critical_designations = render_designation_filters(file_bytes)
     
         result_both, columns_out_both, skipped_sheets_both = build_result(
             file_bytes=file_bytes,
@@ -1280,13 +1061,7 @@ def main() -> None:
                 st.dataframe(filtered_both, use_container_width=True)
     
             with st.expander("Optional Shaft Grouping"):
-                loaded_groups = st.session_state.get("loaded_group_definitions", [])
-                result_to_show, csv_filename_both_out = render_grouping_section(
-                    filtered_both,
-                    month_columns,
-                    csv_filename_both,
-                    loaded_groups,
-                )
+                result_to_show, csv_filename_both_out = render_grouping_section(filtered_both, month_columns, csv_filename_both)
     
                 st.write("### Resulting Dataset")
                 st.dataframe(result_to_show, use_container_width=True)
