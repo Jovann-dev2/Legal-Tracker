@@ -649,7 +649,12 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
             y=alt.Y("Count:Q", title="Monthly Count"),
             color=alt.Color("Series:N", title="Series"),
             opacity=alt.condition(legend_sel, alt.value(1.0), alt.value(0.15)),
-            tooltip=[...],
+            tooltip=[
+                alt.Tooltip("Shaft:N"),
+                alt.Tooltip("Legal Type:N"),
+                alt.Tooltip("Month:N"),
+                alt.Tooltip("Count:Q"),
+            ],
         )
         .properties(width="container", height=420)
     )
