@@ -1147,6 +1147,8 @@ def main() -> None:
 
     preloaded_critical = st.session_state.get("imported_critical")
     preloaded_group_defs = st.session_state.get("imported_group_defs")
+    st.write(preloaded_critical)
+    st.write(preloaded_group_defs)
     preloaded_exclude_ungrouped = st.session_state.get("imported_exclude_ungrouped")
     
     reporting_period_label = get_reporting_period_label(selected_year, selected_month)
