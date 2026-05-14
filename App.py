@@ -923,11 +923,16 @@ def render_grouping_section(
     preloaded_group_defs: list[dict[str, object]] | None,
     preloaded_exclude_ungrouped: bool | None,
 ) -> tuple[pd.DataFrame, str]:
+
+    if preloaded_group_defs != None:
+        flag = True
+    else:
+        flag = False
     grouping_enabled = st.radio(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
         horizontal=True,
-        value=True if preloaded_group_defs is not None else False
+        value=flag
     )
 
     result_to_show = result.copy()
