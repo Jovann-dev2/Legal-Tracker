@@ -93,7 +93,7 @@ CRITICAL_SKILLS_DEFAULT: Final[list[str]] = [
     "Miner General",
 ]
 
-st.set_page_config(page_title="Unavailability Insights", layout="wide")
+st.set_page_config(page_title="Legal Expiry Tracker", layout="wide")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
