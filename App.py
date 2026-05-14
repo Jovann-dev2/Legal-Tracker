@@ -161,6 +161,7 @@ def parse_setup_file(setup_bytes: bytes) -> tuple[tuple[str, ...], list[dict[str
     group_defs = normalize_group_defs(group_raw)
 
     exclude_ungrouped = bool(obj.get("exclude_ungrouped", False))
+    st.write(exclude_ungrouped)
     return critical, group_defs, exclude_ungrouped
 
 
@@ -1148,8 +1149,6 @@ def main() -> None:
 
     preloaded_critical = st.session_state.get("imported_critical")
     preloaded_group_defs = st.session_state.get("imported_group_defs")
-    st.write(st.session_state)
-    st.write(preloaded_group_defs)
     preloaded_exclude_ungrouped = st.session_state.get("imported_exclude_ungrouped")
     
     reporting_period_label = get_reporting_period_label(selected_year, selected_month)
@@ -1226,7 +1225,6 @@ def main() -> None:
                     filtered_critical = filtered_critical[mask_crit].copy()
         
                 st.dataframe(filtered_both, use_container_width=True)
-            st.write(preloaded_group_defs)
             with st.expander("Optional Shaft Grouping"):
                 result_to_show, csv_filename_both_out = render_grouping_section(
                     filtered_both,
