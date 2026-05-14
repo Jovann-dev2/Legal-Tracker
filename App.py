@@ -927,6 +927,7 @@ def render_grouping_section(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
         horizontal=True,
+        value=True if preloaded_group_defs is not None else False
     )
 
     result_to_show = result.copy()
