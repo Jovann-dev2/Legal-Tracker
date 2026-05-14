@@ -1,20 +1,51 @@
+# -----------------------------------------------------------------------------
+# General imports
+# -----------------------------------------------------------------------------
+
+# Enables postponed evaluation of type hints (cleaner forward references and faster imports in some cases).
 from __future__ import annotations
 
-import logging
-import re
-from dataclasses import dataclass
-from io import BytesIO
-import json
-from hashlib import sha256
-from typing import Final
-from uuid import uuid4
-
+# Builds interactive charts (line charts for trends/series).
 import altair as alt
+
+# Reads/writes the “setup” JSON (critical designations + group definitions).
+import json
+
+# App logging (info/warnings/errors while scanning and processing workbooks).
+import logging
+
+# Core data wrangling: reading Excel, cleaning, pivoting, grouping, totals.
 import pandas as pd
+
+# Regex utilities (used for text normalization / matching).
+import re
+
+# UI framework: layout/widgets, caching, session_state, downloads.
 import streamlit as st
+
+# Defines lightweight config objects (e.g., SheetConfig) with minimal boilerplate.
+from dataclasses import dataclass
+
+# Computes a stable hash of setup bytes for change detection.
+from hashlib import sha256
+
+# Wraps uploaded bytes as a file-like object for pandas/openpyxl.
+from io import BytesIO
+
+# Creates an Excel workbook for export.
 from openpyxl import Workbook
+
+# Applies conditional formatting color scales in exported XLSX.
 from openpyxl.formatting.rule import ColorScaleRule
+
+# Styles exported XLSX cells (fonts, borders, fills, alignment).
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+# Marks configuration constants as “Final” for typing clarity.
+from typing import Final
+
+# Generates unique IDs for custom group definitions.
+from uuid import uuid4
 
 # ============================================================
 # Configuration
@@ -102,10 +133,12 @@ SHEET_COLUMN_MAP: Final[dict[str, SheetConfig]] = {
 # Generic helpers
 # ============================================================
 
+# This function creates a SHA-256 has for uploaded setup bytes (detect changes / track imports).
 def _setup_hash(file_bytes: bytes) -> str:
     return sha256(file_bytes).hexdigest()
 
 
+# This function normalizes group definitions into a stable [{id, name, mambers[]}, ...] structure.
 def normalize_group_defs(defs: object) -> list[dict[str, object]]:
     """Ensure group defs have stable structure: {id, name, members[]}."""
     if not isinstance(defs, list):
@@ -124,7 +157,7 @@ def normalize_group_defs(defs: object) -> list[dict[str, object]]:
         out.append({"id": group_id, "name": name, "members": members})
     return out
 
-
+# Thi function removes group members not in available shafts; it fills missing ids/names.
 def filter_group_defs_to_shafts(
     group_defs: list[dict[str, object]],
     shafts: list[str],
@@ -143,7 +176,7 @@ def filter_group_defs_to_shafts(
         )
     return cleaned
 
-
+# This function parses uploaded setup JSON into usable values.
 def parse_setup_file(setup_bytes: bytes) -> tuple[tuple[str, ...], list[dict[str, object]], bool]:
     """Parse uploaded setup JSON."""
     obj = json.loads(setup_bytes.decode("utf-8"))
@@ -163,7 +196,7 @@ def parse_setup_file(setup_bytes: bytes) -> tuple[tuple[str, ...], list[dict[str
     exclude_ungrouped = bool(obj.get("exclude_ungrouped", False))
     return critical, group_defs, exclude_ungrouped
 
-
+# This function builds a downloadable setup JSON (bytes).
 def build_setup_file_bytes(
     critical_designations: tuple[str, ...],
     group_defs: list[dict[str, object]] | None,
@@ -180,33 +213,34 @@ def build_setup_file_bytes(
         payload["exclude_ungrouped"] = bool(exclude_ungrouped)
 
     return json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
-    
+
+# This function normalizes strings (lowercase, alnum-only spacing) for robust column/name matching.
 def normalize_text(value: object) -> str:
     return re.sub(r"[^a-z0-9]+", " ", str(value).strip().lower()).strip()
 
-
+# This function ensures that the chosen year is within VALID_YEAR_RANGE; otherwise it returns DEFAULT_YEAR.
 def validate_year(year: int) -> int:
     min_year, max_year = VALID_YEAR_RANGE
     if min_year <= year <= max_year:
         return year
     return DEFAULT_YEAR
 
-
+# This function returns the 12-month month-number sequence starting from start_month.
 def get_reporting_month_order(start_month: int) -> list[int]:
     return MONTH_NUMBERS[start_month - 1 :] + MONTH_NUMBERS[: start_month - 1]
 
-
+# Ths function computes the 12-month date window for reporting.
 def get_reporting_window(year: int, start_month: int) -> tuple[pd.Timestamp, pd.Timestamp]:
     start_date = pd.Timestamp(year=year, month=start_month, day=1)
     end_date = start_date + pd.DateOffset(months=12) - pd.Timedelta(days=1)
     return start_date, end_date
 
-
+# This fnction returns a human-friendly "Month YYY to Month YYY" label.
 def get_reporting_period_label(year: int, start_month: int) -> str:
     start_date, end_date = get_reporting_window(year, start_month)
     return f"{start_date.strftime('%B %Y')} to {end_date.strftime('%B %Y')}"
 
-
+# This function detects the best header row by scanning for enough non-empty cells.
 def find_first_header_row(df: pd.DataFrame, min_non_empty: int = 6, max_scan: int = 50) -> int:
     scan_limit = min(len(df), max_scan)
     for idx in range(scan_limit):
@@ -216,7 +250,7 @@ def find_first_header_row(df: pd.DataFrame, min_non_empty: int = 6, max_scan: in
             return idx
     return 0
 
-
+# This function reads a sheet and applies detected header row automatically.
 def read_sheet_with_header_detection(excel_file: pd.ExcelFile, sheet_name: str) -> pd.DataFrame:
     temp = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, engine="openpyxl")
     header_row = find_first_header_row(temp)
@@ -226,7 +260,7 @@ def read_sheet_with_header_detection(excel_file: pd.ExcelFile, sheet_name: str) 
     data = data.dropna(how="all")
     return data
 
-
+# This function finds a matching column by normalized comparison against candidate names.
 def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     normalized_targets = [normalize_text(candidate) for candidate in candidates]
     normalized_columns = {column: normalize_text(column) for column in df.columns}
@@ -241,7 +275,7 @@ def find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
 
     return None
 
-
+# Thisfunction converts a column to dattime safely (coerce invalids, preserve datetimes).
 def parse_dates(series: pd.Series) -> pd.Series:
     if pd.api.types.is_datetime64_any_dtype(series):
         return series
@@ -260,7 +294,7 @@ def parse_dates(series: pd.Series) -> pd.Series:
 
     return parsed
 
-
+# This function determines which legal tracker shet it is and which columns are required.
 def classify_sheet(df: pd.DataFrame, sheet_name: str) -> tuple[str | None, dict[str, str]]:
     hard_coded = SHEET_COLUMN_MAP.get(sheet_name)
     if hard_coded:
@@ -286,7 +320,7 @@ def classify_sheet(df: pd.DataFrame, sheet_name: str) -> tuple[str | None, dict[
 
     return None, {}
 
-
+# This function filters rows by designation criticality selection (critical/non-critical/both).
 def apply_designation_filter(
     df: pd.DataFrame,
     filter_mode: str,
@@ -309,11 +343,11 @@ def apply_designation_filter(
 
     return df
 
-
+# This function drops rows where the shaft/group column is blank/NaN.
 def ensure_non_empty_group(df: pd.DataFrame, group_col: str) -> pd.DataFrame:
     return df[df[group_col].notna() & (df[group_col].astype(str).str.strip() != "")].copy()
 
-
+# This function builds per-shaft monthly counts pivot for expiry dates.
 def build_monthly_pivot(
     df: pd.DataFrame,
     group_col: str,
@@ -350,11 +384,11 @@ def build_monthly_pivot(
     pivot["Legal Type"] = legal_type
     return pivot.reset_index().set_index(["Shaft", "Legal Type"])
 
-
+# This function computes annual leave expiry as last_leave + 17 months.
 def compute_annual_leave_expiry(last_leave_series: pd.Series) -> pd.Series:
     return last_leave_series + pd.DateOffset(months=17)
 
-
+# This function builds the annual-leave monthly counts pivot.
 def build_annual_leave_pivot(
     df: pd.DataFrame,
     group_col: str,
@@ -412,7 +446,7 @@ def build_annual_leave_pivot(
     pivot["Legal Type"] = "Annual Leave Expiry"
     return pivot.reset_index().set_index(["Shaft", "Legal Type"])
 
-
+# This function concatenates pivots and enforces month order/names; and it adds totals.
 def finalize_result(pivots: list[pd.DataFrame], start_month: int) -> tuple[pd.DataFrame, list[str]]:
     month_order = get_reporting_month_order(start_month)
     columns_out = [*[MONTH_NAMES[month - 1] for month in month_order], "Total"]
@@ -433,11 +467,12 @@ def finalize_result(pivots: list[pd.DataFrame], start_month: int) -> tuple[pd.Da
 
     return combined.sort_values(["Shaft", "Legal Type"]).reset_index(drop=True), columns_out
 
-
 # ============================================================
 # Cached workbook processing
 # ============================================================
+
 @st.cache_data(show_spinner="🔎 Scanning designations…")
+# This function scans all sheets to collect unique designation values for UI filtering.
 def get_all_designations(file_bytes: bytes) -> list[str]:
     excel_file = pd.ExcelFile(BytesIO(file_bytes), engine="openpyxl")
     seen: set[str] = set()
@@ -455,8 +490,8 @@ def get_all_designations(file_bytes: bytes) -> list[str]:
 
     return sorted(seen)
 
-
 @st.cache_data(show_spinner="🔄 Reading and aggregating workbook…")
+# This function reads a workbook, classifies sheets, builds pivots, and returns results.
 def build_result(
     file_bytes: bytes,
     year: int,
@@ -511,10 +546,11 @@ def build_result(
     result, columns_out = finalize_result(pivots, annual_leave_rollup_month)
     return result, columns_out, skipped_sheets
 
-
 # ============================================================
 # Grouping helpers
 # ============================================================
+
+# This function rolls up shaft rows into custom group rows using a mapping.
 def aggregate_by_custom_groups(
     df: pd.DataFrame,
     shaft_to_group_map: dict[str, str],
@@ -538,7 +574,7 @@ def aggregate_by_custom_groups(
     ordered_columns = ["Shaft", "Legal Type", *month_columns, "Total"]
     return out[ordered_columns]
 
-
+# This function builds shaft->group mapping and flags shafts in multiple groups.
 def get_group_conflicts(group_definitions: list[dict[str, object]]) -> tuple[dict[str, str], list[str]]:
     shaft_to_group: dict[str, str] = {}
     conflicts: set[str] = set()
@@ -554,7 +590,7 @@ def get_group_conflicts(group_definitions: list[dict[str, object]]) -> tuple[dic
 
     return shaft_to_group, sorted(conflicts)
 
-
+# This function initializes/refreshes Streamlit session_state when available shafts change.
 def init_group_state(shafts: list[str], default_group_defs: list[dict[str, object]] | None = None) -> None:
     shafts_signature = tuple(shafts)
     if st.session_state.get("shafts_signature") != shafts_signature:
@@ -566,7 +602,7 @@ def init_group_state(shafts: list[str], default_group_defs: list[dict[str, objec
 
     st.session_state.setdefault("group_defs", [])
 
-
+# This function adds a new empty custom group entry to session_state.
 def add_group_definition() -> None:
     st.session_state.group_defs.append(
         {
@@ -576,14 +612,15 @@ def add_group_definition() -> None:
         }
     )
 
-
 # ============================================================
 # Export helpers
 # ============================================================
+
+# This function serializes a DataFrame into UTF-8 CSV bytes for downloading.
 def dataframe_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
-
+# This function generates a formatted XLSX export (using openpyxl) from the computed results.
 def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], year: int) -> bytes:
     export_df = result_df.copy()
     if export_df.empty:
@@ -689,11 +726,11 @@ def build_legals_xlsx_bytes(result_df: pd.DataFrame, columns_out: list[str], yea
     output.seek(0)
     return output.getvalue()
 
-
 # ============================================================
 # Chart helpers
 # ============================================================
 
+# This function creates a multi-series line chart by Shaft and Legal Type across months.
 def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(
         id_vars=["Shaft", "Legal Type", "Total"],
@@ -708,7 +745,7 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
     # Create a single series label for coloring & legend entries
     tidy["Series"] = tidy["Shaft"].astype(str) + " – " + tidy["Legal Type"].astype(str)
 
-    # --- Interactive legend selection ---
+    # Interactive legend selection
     legend_sel = alt.selection_point(
         fields=["Series"],
         bind="legend",
@@ -738,12 +775,13 @@ def build_detail_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
     )
     return chart
 
-
+# This function aggregates totals per shaft across months and sorts it in descending order.
 def build_totals_by_shaft(df: pd.DataFrame, month_columns: list[str]) -> pd.DataFrame:
     totals = df.groupby("Shaft", as_index=False)[month_columns].sum()
     totals["Total"] = totals[month_columns].sum(axis=1).astype(int)
     return totals.sort_values("Total", ascending=False).reset_index(drop=True)
 
+# This function creates a line chart of month-by-month totals per shaft.
 def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.Chart:
     tidy = df.melt(
         id_vars=["Shaft", "Total"],
@@ -758,9 +796,9 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
         fields=["Shaft"],
         bind="legend",
         on="click",
-        toggle="event.shiftKey",   # Shift+Click for multi-select
-        clear="dblclick",          # Double-click to reset to show all
-        empty="all",               # If nothing selected, everything is fully visible
+        toggle="event.shiftKey",
+        clear="dblclick",
+        empty="all",
     )
 
     chart = (
@@ -794,10 +832,11 @@ def build_totals_line_chart(df: pd.DataFrame, month_columns: list[str]) -> alt.C
 
     return chart
 
-
 # ============================================================
 # UI sections
 # ============================================================
+
+# This function renders the sidebar controls.
 def render_sidebar_options() -> tuple[int, int, bytes | None]:
     st.sidebar.header("Reporting Period")
     current_date = pd.Timestamp.now()
@@ -821,7 +860,7 @@ def render_sidebar_options() -> tuple[int, int, bytes | None]:
         ),
     )
 
-    # --- NEW: setup upload ---
+    # Upload settings
     st.sidebar.divider()
     st.sidebar.header("Saved Setup (optional)")
     use_setup = st.sidebar.checkbox(
@@ -842,21 +881,20 @@ def render_sidebar_options() -> tuple[int, int, bytes | None]:
 
     return validate_year(int(selected_year)), MONTH_NAMES.index(selected_month_name) + 1, setup_bytes
 
-
+# This function renders the app title/description and reporting-period caption.
 def render_header(reporting_period_label: str) -> None:
     st.title(APP_TITLE)
     st.caption(APP_DESCRIPTION)
     st.caption(f"📅 Reporting period: {reporting_period_label}")
 
-
+# This function renders designation filters and returns the chosen critical designations.
 def render_designation_filters(file_bytes: bytes, preloaded_critical: tuple[str, ...] | None) -> tuple[str, ...]:
     dataset_designations = get_all_designations(file_bytes)
     with st.expander("Designation Filter"):
 
-        # Existing default behaviour
         defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
 
-        # NEW: if a setup file provided critical designations, use them as defaults
+        # If a setup file provided critical designations, use them as defaults
         if preloaded_critical:
             in_options = [d for d in preloaded_critical if d in dataset_designations]
             extras = [d for d in preloaded_critical if d not in dataset_designations]
@@ -897,7 +935,7 @@ def render_designation_filters(file_bytes: bytes, preloaded_critical: tuple[str,
         selected_critical_tuple = tuple(sorted(set(selected_critical), key=str.lower))
     return selected_critical_tuple
 
-
+# This function shows KPI-style summary statistics from the result dataset.
 def render_summary_metrics(df: pd.DataFrame, month_columns: list[str]) -> None:
     if df.empty:
         return
@@ -914,7 +952,7 @@ def render_summary_metrics(df: pd.DataFrame, month_columns: list[str]) -> None:
     col3.metric("Legal types", unique_legal_types)
     col4.metric("Peak month", peak_month)
 
-
+# This function exists for the UI for grouping; it applies grouping to results.
 def render_grouping_section(
     result: pd.DataFrame,
     month_columns: list[str],
@@ -1015,7 +1053,7 @@ def render_grouping_section(
     st.success("✅ Custom grouping applied.")
     return grouped_result, output_filename
 
-
+# This function displays detailed time-series analysis.
 def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporting_period_label: str) -> None:
     st.subheader(f"Time Series: {reporting_period_label}")
     st.write("The graph below depicts multiple types of expiries that will occur over the next year.")
@@ -1041,7 +1079,7 @@ def render_detailed_analysis(df: pd.DataFrame, month_columns: list[str], reporti
     else:
         st.altair_chart(build_detail_line_chart(filtered_df, month_columns), use_container_width=True)
 
-
+# This function displays totals-focused analysis.
 def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
     if df.empty:
         st.info("No data available to calculate total expiries.")
@@ -1062,7 +1100,7 @@ def render_totals_analysis(df: pd.DataFrame, month_columns: list[str]) -> None:
         filtered_totals_df = totals_df[totals_df["Shaft"].isin(selected_shafts)].copy()
         st.altair_chart(build_totals_line_chart(filtered_totals_df, month_columns), use_container_width=True)
 
-
+# This function provides download buttons for CSV/XLSX and a JSON file for future easy setup.
 def render_downloads_dual(
     df_both: pd.DataFrame,
     df_critical: pd.DataFrame,
@@ -1074,7 +1112,7 @@ def render_downloads_dual(
     group_definitions: list[dict[str, object]],
     exclude_ungrouped: bool,
 ) -> None:
-    # --- NEW: download setup file BEFORE the "Downloads" heading ---
+    # Download setup file before the "Downloads" heading
     setup_bytes = build_setup_file_bytes(
         critical_designations=critical_designations,
         group_defs=group_definitions,
@@ -1139,6 +1177,9 @@ def render_downloads_dual(
 # ============================================================
 # Main app
 # ============================================================
+
+# THe program is run in its entirety using the main() function, given below.
+
 def main() -> None:
     selected_year, selected_month, setup_bytes = render_sidebar_options()
     # --- NEW: apply uploaded setup (if any) ---
