@@ -154,9 +154,10 @@ def parse_setup_file(setup_bytes: bytes) -> tuple[tuple[str, ...], list[dict[str
     critical = tuple(sorted({str(x).strip() for x in critical_raw if str(x).strip()}, key=str.lower))
 
     # accept either key for robustness
-    group_raw = obj.get("shaft_groups")
-    if group_raw is None:
-        group_raw = obj.get("group_defs")
+    try:
+        group_raw = obj.get("group_definitions")
+    except:
+        group_raw = None
     group_defs = normalize_group_defs(group_raw)
 
     exclude_ungrouped = bool(obj.get("exclude_ungrouped", False))
