@@ -161,7 +161,6 @@ def parse_setup_file(setup_bytes: bytes) -> tuple[tuple[str, ...], list[dict[str
     group_defs = normalize_group_defs(group_raw)
 
     exclude_ungrouped = bool(obj.get("exclude_ungrouped", False))
-    st.write(exclude_ungrouped)
     return critical, group_defs, exclude_ungrouped
 
 
