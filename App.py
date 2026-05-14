@@ -925,14 +925,14 @@ def render_grouping_section(
 ) -> tuple[pd.DataFrame, str]:
 
     if preloaded_group_defs != None:
-        flag = "Yes"
+        flag = 1
     else:
-        flag = "No"
+        flag = 0
     grouping_enabled = st.radio(
         "Would you like to combine shaft names into custom groups?",
         options=["No", "Yes"],
         horizontal=True,
-        value=flag,
+        index=flag,
     )
 
     result_to_show = result.copy()
