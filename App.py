@@ -849,8 +849,8 @@ def render_header(reporting_period_label: str) -> None:
 
 
 def render_designation_filters(file_bytes: bytes, preloaded_critical: tuple[str, ...] | None) -> tuple[str, ...]:
+    dataset_designations = get_all_designations(file_bytes)
     with st.expander("Designation Filter"):
-        dataset_designations = get_all_designations(file_bytes)
 
         # Existing default behaviour
         defaults = sorted(set(dataset_designations).intersection(CRITICAL_SKILLS_DEFAULT))
@@ -1223,7 +1223,7 @@ def main() -> None:
                     filtered_critical = filtered_critical[mask_crit].copy()
         
                 st.dataframe(filtered_both, use_container_width=True)
-    
+            st.write(preloaded_group_defs)
             with st.expander("Optional Shaft Grouping"):
                 result_to_show, csv_filename_both_out = render_grouping_section(
                     filtered_both,
